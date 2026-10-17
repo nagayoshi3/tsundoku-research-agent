@@ -1,0 +1,59 @@
+# tsundoku-research-agent の設定（既定値）。自分用に変えるときは、リポジトリ直下に config.yaml としてコピーして編集する。
+# API キーはここに書かない（.env か環境変数：OPENAI_API_KEY、INOREADER_APP_ID、INOREADER_APP_KEY）。
+
+# 自分の関心領域の説明。採点の文脈にだけ使う（絞り込みには使わない）。狭く書くと、それ以外のカテゴリの採点が一律に低くなる
+theme: >-
+  AI 全般の技術動向。AIエージェント、Physical AI（ロボット学習・VLA）、RAG・知識活用、LLM の新モデル、
+  ファインチューニング・強化学習、SLM・効率化、マルチモーダル、評価・安全性、AI 産業の動き
+
+# 大きなカテゴリ → 手がかり語。各話題に1つ付ける（規則で付け、本物の LLM なら LLM が上書き）。どれにも当たらなければ「その他」
+categories:
+  Physical AI: [robot, vla, manipulation, humanoid, embodied, sim-to-real, locomotion, world model, ロボット]
+  AIエージェント: [agent, agentic, tool-use, tool use, planning, mcp, multi-agent, computer use, エージェント]
+  RAG・知識活用: [rag, retrieval, graphrag, knowledge graph, vector, search, long-context, 検索, ナレッジ]
+  LLMモデル動向: [gpt, claude, gemini, llama, qwen, deepseek, frontier, scaling, reasoning model, release, 新モデル]
+  学習・適応: [fine-tuning, finetuning, rlhf, grpo, reinforcement learning, distillation, synthetic data, post-training, ファインチューニング, 強化学習]
+  効率化・SLM: [slm, small language model, quantization, inference, on-device, latency, 軽量]
+  マルチモーダル: [vision, vlm, multimodal, video, speech, audio, image generation, マルチモーダル]
+  評価・安全性: [benchmark, evaluation, eval, guardrail, safety, alignment, regulation, jailbreak, 評価, 安全]
+  産業・ビジネス: [funding, acquisition, acquires, partnership, launches, enterprise, revenue, earnings, 資金調達, 提携, 買収]
+
+# 役割分担：theme = 守備範囲（関連度の土台）、categories = 分類と同じ話題のまとめ、focus_keywords = 守備範囲の中で今とくに押し上げたい焦点。
+# focus_keywords は採点（関連度に +1）と採点に回す順番にだけ効き、分類・まとめには使わない。全カテゴリを並べると「重視」の意味が消えるので 3〜6 語に絞る。
+# 計画（plan）がその週の記事から数語を推薦して足すので、固定するのは長く追いかけるものだけでよい
+focus_keywords: [AI agent, frontier model, VLA, world model]
+
+# 読む話題の選び方：件数で切らず、合計点（関連度＋新規性＋注目度＋媒体数）が「しきい値」以上の話題を全部出す。
+# shortlist_min_score が null なら自動（上から shortlist_size 番目の合計点。同点まで含めるので件数は目安の前後）。
+# 人が除外して目安を下回った分は次点で埋める（backfill）。shortlist_size が 0 なら採点した話題を全部出す
+shortlist_size: 20
+shortlist_min_score: null
+backfill: true
+
+# 承認①（キーワード・採点件数の確認）で止めるか。false なら LLM の提案をそのまま使う（承認②だけで止まる）
+ask_plan: true
+
+# 要約：読むと決めた話題の本文を取りに行き、同じ話題の記事（最大 summary_max_articles 本）を横断して1つにまとめる。
+# summary_scope が all なら、読むものに入らなかった話題も付録に要約する（費用と時間は話題数に比例）。selected なら読むものだけ
+summary_chars: 300
+summary_chars_multi: 400
+summary_max_articles: 4
+summary_fetch_body: true
+summary_scope: all
+
+# LLM と埋め込み（langchain の init_chat_model / init_embeddings の形式）
+model: "openai:gpt-4.1-mini"
+embed_model: "openai:text-embedding-3-small"
+entity_llm: true          # true: 固有名詞の抜き出しに規則＋LLM（25件ずつ）。false: 規則だけ
+
+# 取得元（type は sources/ で @register した名前：inoreader_api / rss）。limit は読み込む上限、quota は採点に回す枠の配分（取得元が複数のとき）
+sources:
+  - name: inoreader-saved
+    type: inoreader_api
+    stream: user/-/state/com.google/starred     # Inoreader の「後で読む（Saved）」
+    date_field: saved                            # saved / crawl / published
+    limit: 1000
+    quota: 100
+  # - {name: my-feed, type: rss, url: "https://example.com/feed.xml", limit: 100, quota: 30}   # 任意の RSS を足すとき
+
+inoreader_redirect_uri: "http://localhost"       # Inoreader のアプリ登録のリダイレクト先と同じにする

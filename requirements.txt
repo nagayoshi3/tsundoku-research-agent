@@ -1,0 +1,13 @@
+# pip install -r requirements.txt （パッケージとして入れるなら pip install -e . でよい）
+langgraph==1.2.14
+langgraph-checkpoint-sqlite==3.1.1
+langchain==1.4.3
+langchain-openai==1.7.0
+pydantic>=2.7
+numpy>=1.26
+requests>=2.31
+feedparser>=6.0
+trafilatura>=1.9
+python-docx>=1.1
+pyyaml>=6.0
+python-dotenv>=1.0

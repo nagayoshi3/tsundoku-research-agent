@@ -1,0 +1,24 @@
+# 秘密情報と実行結果
+.env
+inoreader_token.json
+inoreader_credentials.json
+tsundoku_data/
+*.sqlite
+*.sqlite.corrupt-*
+config.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# エディタ・OS
+.vscode/
+.idea/
+.DS_Store
+.ipynb_checkpoints/
