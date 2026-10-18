@@ -1,0 +1,26 @@
+{
+    "hooks": {
+      "PostToolUse": [
+        {
+          "matcher": "Edit|Write",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py) ruff format --quiet \"$f\"; ruff check --fix --quiet \"$f\";; esac; exit 0"
+            }
+          ]
+        }
+      ],
+      "Stop": [
+        {
+          "matcher": "",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "if [ \"$(jq -r '.stop_hook_active')\" = \"true\" ]; then exit 0; fi; cd \"$CLAUDE_PROJECT_DIR\" && out=$(OPENAI_API_KEY=dummy python -m pytest -q -x 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then echo \"$out\" | tail -20 >&2; exit 2; fi; exit 0"
+            }
+          ]
+        }
+      ]
+    }
+  }
