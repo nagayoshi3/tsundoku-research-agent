@@ -35,7 +35,7 @@ graph TD
 Python 3.11 以上。conda でも venv でも動きます。
 
 ```bash
-git clone https://github.com/<you>/tsundoku-research-agent.git
+git clone https://github.com/nagayoshi3/tsundoku-research-agent.git
 cd tsundoku-research-agent
 
 # conda の場合
