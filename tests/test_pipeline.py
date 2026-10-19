@@ -20,7 +20,7 @@ from tsundoku.guardrails import check_report
 from tsundoku.nodes.cluster import SAME_TOPIC, title_part, topic_score
 from tsundoku.nodes.fetch import allocate
 from tsundoku.nodes.report import report
-from tsundoku.nodes.scoring import ja_title, total_score
+from tsundoku.nodes.scoring import buzz, ja_title, total_score
 from tsundoku.periods import JST, period_label, period_range
 from tsundoku.sources import normalize_url, register
 
@@ -264,6 +264,23 @@ def test_allocate_and_titles():
         ja_title({"title": "T"}, {"title_ja": ""}) == "T"
         and ja_title({"title": "T"}, {"title_ja": "日本語"}) == "日本語"
     )
+
+
+def test_buzz_and_total_score():
+    def cand(*outlets, same_id=()):
+        rel = [{"outlet": o, "why": "似た話題"} for o in outlets[1:]] + [
+            {"outlet": o, "why": "同じ ID"} for o in same_id
+        ]
+        return {"outlet": outlets[0], "related": rel}
+
+    # 媒体1つで0、2つで1、5つでも3で頭打ち（同じ媒体の重複は1つに数える）
+    assert buzz(cand("A")) == 0 and buzz(cand("A", "A")) == 0
+    assert buzz(cand("A", "B")) == 1
+    assert buzz(cand("A", "B", "C", "D", "E")) == 3
+    # 「同じ ID」の記事（同じ論文の別経路など）は別媒体でも数えない
+    assert buzz(cand("A", same_id=("B",))) == 0 and buzz(cand("A", "B", same_id=("C",))) == 1
+    # 合計 ＝ 関連度 ＋ 新しさ ＋ impact ＋ buzz
+    assert total_score({"relevance": 4, "novelty": 3, "impact": 2}, cand("A", "B", "C")) == 4 + 3 + 2 + 2
 
 
 def test_settings_restored():
