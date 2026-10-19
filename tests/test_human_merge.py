@@ -173,3 +173,12 @@ def test_chained_merges_rescore_only_surviving_topic(state, monkeypatch):
     extra, _ = hm.apply_merges(state, [["a", "b"], ["a", "c"]])
     assert calls == [("c", 2)]
     assert [s["id"] for s in extra["scored"]] == ["c"]
+
+
+def test_merge_ignores_topics_not_in_current_shortlist(state):
+    """前の回に確定した話題（今回の提示にない）とはまとめない。今回の提示どうしの組だけ反映する。"""
+    state["shortlist"] = ["b", "c", "d"]  # a は前の回に確定済み（selected にある）
+    extra, alias = hm.apply_merges(state, [["a", "b"], ["c", "d"]])
+    assert alias == {"d": "c"}
+    assert {c["id"] for c in extra["pool"]} == {"a", "b", "c"}
+    assert extra["selected"] == ["a"]

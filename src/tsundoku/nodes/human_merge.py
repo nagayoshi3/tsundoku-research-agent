@@ -90,8 +90,11 @@ def apply_merges(state: dict, groups: list[list[str]]) -> tuple[dict, dict[str, 
         ids = []
         for i in g:
             i = resolve(i)
-            if i in pool and i not in ids:
+            # まとめられるのは今回見せた話題だけ（前の回に確定した話題を吸収すると selected に二重に入る）
+            if i in pool and i in order and i not in ids:
                 ids.append(i)
+            elif i not in ids and i not in order:
+                log(f"[review] まとめられない指定（今回の提示にない）: {i}")
         if len(ids) < 2:
             continue
         keep = max(
