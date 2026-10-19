@@ -50,6 +50,23 @@ def merge_hints(cands: list[dict]) -> list[dict]:
     return out[:MAX_HINTS]
 
 
+def merge_finals(merges: list[dict]) -> list[str]:
+    """承認②の記録（feedback["merges"]）ごとに、今残っている行き先の id を返す。
+
+    記録の履歴（merged → into）をたどるので、final を持たない古い記録や、後のまとめでさらに吸収された
+    final も、今残っている id まで進む。吸収された id は pool から消えて二度と into にならないので、輪にはならない。
+    """
+    hist = {j: m["into"] for m in merges for j in m["merged"]}
+    out = []
+    for m in merges:
+        i, seen = m.get("final", m["into"]), set()
+        while i in hist and i not in seen:  # seen は壊れた記録で止まらなくなるのを防ぐだけ
+            seen.add(i)
+            i = hist[i]
+        out.append(i)
+    return out
+
+
 def apply_merges(state: dict, groups: list[list[str]]) -> tuple[dict, dict[str, str]]:
     """人の指定（id のリストのリスト）を反映した State の差分と、吸収された id → 残した id の対応を返す。
 
@@ -129,6 +146,7 @@ def apply_merges(state: dict, groups: list[list[str]]) -> tuple[dict, dict[str, 
 
     prev = state.get("feedback") or {"proposed": [], "approved": [], "rejected": {}, "added": []}
     drop = set(alias) | {r["into"] for r in records}
+    merges = prev.get("merges", []) + records
     return {
         "pool": [pool[c["id"]] for c in state["pool"] if c["id"] in pool],
         "topics": [topics[t["id"]] for t in state.get("topics", []) if t["id"] in topics],
@@ -144,6 +162,6 @@ def apply_merges(state: dict, groups: list[list[str]]) -> tuple[dict, dict[str, 
             "added": remap(prev["added"]),
             "rejected": {resolve(k): v for k, v in prev["rejected"].items()},
             # into は記録した時点の行き先（履歴）。final は後のまとめでさらに吸収された先までたどった、今残っている id
-            "merges": [{**m, "final": resolve(m.get("final", m["into"]))} for m in prev.get("merges", []) + records],
+            "merges": [{**m, "final": f} for m, f in zip(merges, merge_finals(merges))],
         },
     }, {i: resolve(i) for i in alias}  # 呼び出し元は1段引くだけで済むように、たどった先を返す

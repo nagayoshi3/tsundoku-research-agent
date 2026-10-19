@@ -14,6 +14,7 @@ from tsundoku.guardrails import check_report
 from tsundoku.models import ResearchState
 from tsundoku.nodes.cluster import headline_groups
 from tsundoku.nodes.fetch import keyword_hits
+from tsundoku.nodes.human_merge import merge_finals
 from tsundoku.nodes.scoring import (
     buzz,
     ja_title,
@@ -421,9 +422,9 @@ def report(state: ResearchState) -> dict:
         for n, v in state.get("funnel", {}).items()
     ]
     if fb.get("merges"):
-        absorbed: dict[str, int] = {}  # 連鎖してまとめても、今残っている話題ごとに数える（final がない古い記録は into）
-        for m in fb["merges"]:
-            absorbed[m.get("final", m["into"])] = absorbed.get(m.get("final", m["into"]), 0) + len(m["merged"])
+        absorbed: dict[str, int] = {}  # 連鎖してまとめても、今残っている話題ごとに数える（final がない古い記録も履歴からたどる）
+        for m, f in zip(fb["merges"], merge_finals(fb["merges"])):
+            absorbed[f] = absorbed.get(f, 0) + len(m["merged"])
         L.append(
             f"- 承認②で人がまとめた話題: {len(fb['merges'])} 組（"
             + "、".join(f"{pool[k]['title'][:30]} ← {n}" for k, n in absorbed.items() if k in pool)

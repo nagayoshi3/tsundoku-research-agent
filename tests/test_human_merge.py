@@ -145,3 +145,20 @@ def test_resume_from_empty_question_does_not_rescore(state, monkeypatch):
     out = app.invoke(Command(resume={"action": "end"}), cfg)
     assert calls == ["a"]  # まとめた話題を1回だけ採点し直す（2回目の再開で走らない）
     assert out["review_action"] == "done"
+
+
+def test_old_chained_records_resolve_through_history(state, tmp_path, monkeypatch):
+    """final がない古い記録で同じ回に連鎖していても（a←b の後に c←a）、履歴をたどって今残っている c にまとまる。"""
+    from tsundoku.config import settings
+    from tsundoku.nodes.report import report
+
+    monkeypatch.setattr(settings, "workdir", str(tmp_path))
+    state["pool"] = [c for c in state["pool"] if c["id"] in "cd"]  # a・b は前の回で吸収済み
+    state["feedback"]["merges"] = [{"into": "a", "merged": ["b"]}, {"into": "c", "merged": ["a"]}]
+    assert hm.merge_finals(state["feedback"]["merges"]) == ["c", "c"]
+    md = report(_report_state(state))["report_md"]
+    assert "- 承認②で人がまとめた話題: 2 組（T c ← 2）" in md
+    state["feedback"]["merges"][0]["final"] = "a"  # 前の版が吸収済みの id を final に書いた記録も、たどり直す
+    state["shortlist"] = ["c", "d"]
+    extra, _ = hm.apply_merges(state, [["c", "d"]])
+    assert [m["final"] for m in extra["feedback"]["merges"]] == ["c", "c", "c"]
