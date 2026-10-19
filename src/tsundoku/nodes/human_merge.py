@@ -62,10 +62,16 @@ def apply_merges(state: dict, groups: list[list[str]]) -> tuple[dict, dict[str, 
     order = {i: k for k, i in enumerate(state.get("shortlist", []))}
     alias: dict[str, str] = {}
     new_scores, records = [], []
+
+    def resolve(i):  # 吸収が重なる（a←b の後に c←a）こともあるので、残った id までたどる
+        while i in alias:
+            i = alias[i]
+        return i
+
     for g in groups or []:
         ids = []
         for i in g:
-            i = alias.get(i, i)
+            i = resolve(i)
             if i in pool and i not in ids:
                 ids.append(i)
         if len(ids) < 2:
@@ -116,7 +122,7 @@ def apply_merges(state: dict, groups: list[list[str]]) -> tuple[dict, dict[str, 
     def remap(ids):
         out = []
         for i in ids:
-            i = alias.get(i, i)
+            i = resolve(i)
             if i not in out:
                 out.append(i)
         return out
@@ -136,7 +142,7 @@ def apply_merges(state: dict, groups: list[list[str]]) -> tuple[dict, dict[str, 
             "proposed": remap(prev["proposed"]),
             "approved": remap(prev["approved"]),
             "added": remap(prev["added"]),
-            "rejected": {alias.get(k, k): v for k, v in prev["rejected"].items()},
+            "rejected": {resolve(k): v for k, v in prev["rejected"].items()},
             "merges": prev.get("merges", []) + records,
         },
-    }, alias
+    }, {i: resolve(i) for i in alias}  # 呼び出し元は1段引くだけで済むように、たどった先を返す
