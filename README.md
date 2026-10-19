@@ -108,7 +108,7 @@ tsundoku run monthly 2026-09             # 月次
 
 | ファイル | 中身 |
 |---|---|
-| `report-weekly-2026-W42.md` / `.docx` | レポート。集計 → 今回読むもの（要約・評価の表） → 全話題（カテゴリ別・採点順） → 付録（読まなかった話題の要約） → 除外と理由 → 選定の記録 |
+| `report-weekly-2026-W42.md` / `.docx` | レポート。集計 → 今回読むもの（要約・評価の表） → 全話題（カテゴリ別・採点順） → 付録（読まなかった話題の要約） → 除外と理由 → 選定の記録（件数の流れ、LLM のトークン数と費用の目安） |
 | `weekly-2026-W42-trace.csv` | 記事1本1行の経路の記録。どの段階（取得／まとめ／代表／採点対象／提示／確定）まで進んだか、点数、基準別の理由、承認②の結果（除外・追加・人がまとめた） |
 | `weekly-2026-W42-articles.csv`, `-stats.json` | 記事一覧と集計 |
 | `inoreader-inoreader-saved-weekly-2026-W42.json` | Inoreader から取ったままの生データ |
@@ -129,13 +129,15 @@ tsundoku run monthly 2026-09             # 月次
 | `ask_plan` | 承認①で止めるか | true |
 | `summary_chars` / `summary_chars_multi` / `summary_scope` | 要約の字数（1本／複数本）／付録まで要約するか（all / selected） | 300 / 400 / all |
 | `model` / `embed_model` | LLM と埋め込み（langchain の `init_chat_model` 形式） | gpt-4.1-mini / text-embedding-3-small |
-| `price_per_1m_input` / `price_per_1m_output` | LLM の料金（円／100万トークン）。レポートの「選定の記録」に出す費用の目安に使う（埋め込みは含めない）。`model` を変えたら合わせる | 60 / 240 |
+| `price_per_1m_input` / `price_per_1m_output` | LLM の料金（円／100万トークン）。レポートの「選定の記録」に出す費用の目安に使う（埋め込みは含めない）。`model` を変えたら合わせる。config.yaml に書いていなければ既定値を使う | 60 / 240 |
 
 API キーは `.env` か環境変数（`OPENAI_API_KEY`、`INOREADER_APP_ID`、`INOREADER_APP_KEY`。任意で `LANGSMITH_API_KEY`）。
 
 ## 費用と時間の目安
 
 週 100 話題で、採点・要約・埋め込みを合わせて OpenAI の API 利用が 30〜50 円、所要 5〜8 分（承認の待ち時間を除く）。付録の要約をやめる（`summary_scope: selected`）と 10 円前後・2〜3 分。Inoreader の API は Pro プランが必要です（1日 100 回まで。週 1 回の実行で数回）。
+
+実際に使った LLM のトークン数と費用の目安は、レポートの「選定の記録」に「LLM トークン: 入力 N ・ 出力 M（約 X 円）」として出ます（実行の最後に画面に出る `metrics:` の JSON にも `tokens`・`cost_jpy` が入ります。完了済みの期間をもう一度指定したときは、前回のレポート本文だけを表示し、metrics の行は出しません）。料金は `price_per_1m_input` / `price_per_1m_output` から計算した目安で、埋め込みの分は含みません。途中で止めて再開した場合は（承認の入力中に止めても、採点の途中で落ちても）、再開後に呼んだ分だけです。デモ（偽 LLM）は1回あたり固定のトークン数を数えるので、実際の費用はかかりませんが表示は 0 円になりません。
 
 ## コードの構成
 

@@ -286,9 +286,9 @@ aggregate は cluster_topics の直後に動き、期間内に保存した記事
 
 | 項目 | 内容 |
 |---|---|
-| 入力 | State の `pool`、`scored`、`feedback`、`selected`、`stats`、`funnel`、`failed_sources`、`guardrail_flags`、`approved_plan`、`candidates`、`topics` |
+| 入力 | State の `pool`、`scored`、`feedback`、`selected`、`stats`、`funnel`、`failed_sources`、`guardrail_flags`、`approved_plan`、`candidates`、`topics`。State の外から `token_usage()`（F-18 のトークン数の合計） |
 | 処理 | (1) `check_report(selected, pool)` で出典の実在を照合。(2) 指標を計算。(3) 見出し、テーマとキーワード、集計、今回読むもの、全話題、付録、除外したものと理由、選定の記録の順に組み立てる。Markdown のほか、`md_to_docx()` で同じ内容の Word（見出し・箇条書き・表・太字・リンク）も書く。(4) 保存先の `report-{mode}-{period}.md` と `.docx` に保存 |
-| 構成 | `# リサーチレポート {period}` → テーマ・キーワード → `## 集計`（保存数→話題数、日別の表、よく保存した話題（カテゴリ付き）、カテゴリ別・話題キーワード別・媒体・タグ・固有名詞）→ `## 今回読むもの`（`### N. [カテゴリ] 日本語タイトル`、原題、本文の要約（段落、要約の元の本数）、媒体・保存日時、点数の内訳「合計N ＝ 関連度a ＋ 新規性b ＋ 注目度c ＋ 媒体+d」、基準ごとの「点数/5: 理由」と総評、出典、同じ話題: N本とその出典最大5本、追加分に「（追加）」）→ `## 全話題（カテゴリ別・採点順）`（採点に回した全話題を1項目ずつ。✔ 確定・✖ 却下の印、点数の内訳、タイトル、同じ話題の本数、その下に要点・関連度・新規性・注目度・媒体の各行。承認しなかった話題も見える）→ `## 付録：読むものに入らなかった話題の要約`（`summary_scope` が all のとき。カテゴリ別・採点順に、タイトル・合計点の内訳・要約）→ `## 除外したものと理由` → `## 選定の記録`（件数の流れ、指標、取得元ごとの件数、承認②で人がまとめた話題、取れなかった取得元、ガードレールの検出） |
+| 構成 | `# リサーチレポート {period}` → テーマ・キーワード → `## 集計`（保存数→話題数、日別の表、よく保存した話題（カテゴリ付き）、カテゴリ別・話題キーワード別・媒体・タグ・固有名詞）→ `## 今回読むもの`（`### N. [カテゴリ] 日本語タイトル`、原題、本文の要約（段落、要約の元の本数）、媒体・保存日時、点数の内訳「合計N ＝ 関連度a ＋ 新規性b ＋ 注目度c ＋ 媒体+d」、基準ごとの「点数/5: 理由」と総評、出典、同じ話題: N本とその出典最大5本、追加分に「（追加）」）→ `## 全話題（カテゴリ別・採点順）`（採点に回した全話題を1項目ずつ。✔ 確定・✖ 却下の印、点数の内訳、タイトル、同じ話題の本数、その下に要点・関連度・新規性・注目度・媒体の各行。承認しなかった話題も見える）→ `## 付録：読むものに入らなかった話題の要約`（`summary_scope` が all のとき。カテゴリ別・採点順に、タイトル・合計点の内訳・要約）→ `## 除外したものと理由` → `## 選定の記録`（件数の流れ、指標、LLM のトークン数と費用の目安（F-18）、取得元ごとの件数、承認②で人がまとめた話題、取れなかった取得元、ガードレールの検出） |
 | 出力 | `report_md`、`metrics`、`guardrail_flags`（出力側の検出を連結）、レポートファイル |
 | 例外 | 確定が0本なら「（今回はなし）」。`pool` にない id は書かず、検出として記録 |
 | 受け入れ条件 | `report_md` に `## 集計``、同じ話題: 3本、[Physical AI]` を含む。`metrics.adoption_rate == 0.3` |
@@ -365,7 +365,7 @@ LLM の前後に検査を置く。入力側は「外部の文章をデータと�
 | 入力欄（承認①） | 与えたキーワード、推薦（`＋ おすすめ: 語 — 理由`）、今回のキーワードを表示。キーワード（カンマ区切り、空でそのまま）、採点件数（数字、空でそのまま）。常に `{"approved": True}` を含める。`--yes`（`cli.AUTO_APPROVE`）なら入力を求めず空で進む |
 | 入力欄（承認②） | まとめる番号（`3+7; 2+5+9`。枝番も可。推薦があれば一覧の後に「💡 同じ話題かもしれない組み合わせ」として番号付きで表示）、一覧（番号、点数、カテゴリ、タイトル、媒体、同じ話題 +N、理由）を表示。`除外 2:既読; 4``b:範囲外（番号でその項目の全部、枝番でまとまりの中の1本。``空 Enter で除外なし＝全部読む）、追加は記事の URL か arXiv ID（カンマ区切り）。承認の番号入力はない。番号は id に変換し、範囲外は無視して知らせ`る |
 | 入力欄（全却下） | `next` か `end` |
-| 出力 | 画面表示（期間、起動/再開/完了、各承認の提示、採点・要約の進み具合（10件ごと）、レポート、metrics、保存したファイルのパス） |
+| 出力 | 画面表示（期間、起動/再開/完了、各承認の提示、採点・要約の進み具合（10件ごと）、レポート、metrics（JSON。F-18 のトークン数・費用の目安を含む）、保存したファイルのパス）。完了済みの期間を指定したときは、前回のレポート本文だけを表示し、metrics とファイルのパスは出さない |
 | 例外 | 入力の途中で止めても（Ctrl+C）状態は SQLite に残り、同じ週・月に読み替えられる指定で呼び直すと止まった承認から再開する |
 | 受け入れ条件 | 2026-10-14 時点で `normalize_period("weekly", "2026-10-06")` と `"2026/10/11"` が `2026-W41`、省略が `2026-W41`、`-2` が `2026-W40`、`normalize_period("monthly", -10)` が `2025-12`。本番設定で `run_interactive("weekly")` が承認①②を経て `report-weekly-….md` を出す |
 
@@ -395,11 +395,12 @@ LLM の前後に検査を置く。入力側は「外部の文章をデータと�
 
 | 項目 | 内容 |
 |---|---|
-| 入力 | 各 LLM 呼び出しの入力・出力トークン数（structured_call の戻りから取る） |
-| 処理 | 呼び出しごとに数えて合計。並列（score_one、summarize）でも壊れないようにロックを使う |
-| 出力 | metrics["tokens"]（入力・出力の合計）と metrics["cost_jpy"]。レポートの「選定の記録」に「- LLM トークン: 入力 N ・ 出力 M（約 X 円）」の行 |
-| 設定 | default_config.yaml に price_per_1m_input / price_per_1m_output（円） |
-| 受け入れ条件 | デモ（偽 LLM）でも metrics["tokens"] が 0 より大きく、report_md に「LLM トークン」を含む行がある。偽 LLM は固定のトークン数を返す |
+| 入力 | 各 LLM 呼び出しの入力・出力トークン数。本物の LLM は `with_structured_output(schema, include_raw=True)` の元の応答の `usage_metadata`（`input_tokens`、`output_tokens`。なければ0）、偽 LLM は1回あたり固定の `FAKE_TOKENS`（入力1000・出力200） |
+| 処理 | `structured_call` の中で呼び出しごとに `count_tokens()` で足し、プロセス内で合計。並列（score_one、summarize）でも壊れないようにロックを使う。形式が崩れた応答（`parsing_error`、`parsed` が空）も数えてから例外にする。`run_interactive` の頭で `reset_tokens()` して実行ごとに数え直す。費用は `cost_jpy()`＝（入力×`price_per_1m_input`＋出力×`price_per_1m_output`）÷100万。埋め込みは含めない |
+| 出力 | `metrics["tokens"]`（入力＋出力の合計）、`tokens_input`、`tokens_output`、`cost_jpy`（小数1桁に丸め）。レポートの「選定の記録」に「- LLM トークン: 入力 N ・ 出力 M（約 X 円）」の行（N・M は3桁区切り）。実行ログの `[report]` の行に「LLM 約 X 円」 |
+| 設定 | default_config.yaml と config.example.yaml に price_per_1m_input / price_per_1m_output（円／100万トークン）。config.yaml に書いていなければ、同梱の default_config.yaml の値を使う（0 円にしない） |
+| 制約 | プロセス内の合計で `run_interactive` を呼ぶたびに0に戻るので、中断して再開すると再開前の分は数えられない（レポートには再開後の分だけ出る）。承認の入力中に止めた場合も、ノードの途中（score_one など）で落ちた場合も同じで、再開後に実際に呼んだ分だけを数える。終わっていた score_one は呼び直さないので、二重には数えない。料金は設定値からの目安で、`model` を変えたら合わせて直す |
+| 受け入れ条件 | デモ（偽 LLM）でも `metrics["tokens"]` が 0 より大きく、`tokens == tokens_input + tokens_output`。入力・出力がどちらも `FAKE_TOKENS` の、偽 LLM を実際に呼んだ回数倍。`cost_jpy` が `round(cost_jpy(...), 1)` と一致し、report_md に「- LLM トークン: 入力 N ・ 出力 M（約 X 円）」の行がちょうど1行あり、N・M・X が metrics と一致する。実行ログの `[report]` の行に「LLM 約 X 円」がある。本物の LLM の経路では `usage_metadata` の値を数え、形式が崩れた応答も数え、`usage_metadata` がなければ0。料金を書いていない config.yaml でも同梱の値（60 / 240）で計算し、書けばその値を使う。`run_interactive` は前に残っていた数を持ち越さず、画面の metrics（JSON）に `tokens`・`tokens_input`・`tokens_output`・`cost_jpy` が入る。承認②で止めて再開した回と、score_one の途中で落ちて再開した回は、再開後に呼んだ分だけを数え、中断前と再開後の呼び出し回数の合計が `fresh` で最初から通した回と同じ |
 
 
 ## 13. データ要件 `models.py`
@@ -453,7 +454,7 @@ LLM の前後に検査を置く。入力側は「外部の文章をデータと�
 | `summaries` | 上書き | summarize | 話題 id → {text, sources_used, articles} |
 | `selected`、`feedback`、`review_action` | 上書き | review（`review_action` は confirm_empty も） | 確定分、承認②の記録、次の行き先（`done` / `next` / `ask` / `end`） |
 | `guardrail_flags` | 連結 | merge、report | 検出したもの |
-| `metrics`、`report_md` | 上書き | report | 指標とレポート本文 |
+| `metrics`、`report_md` | 上書き | report | 指標（F-18 のトークン数・費用の目安を含む）とレポート本文 |
 
 「連結」は `Annotated[list, operator.add]`。Send で並列に走ったノードの戻り値が上書きされずにすべて残る。
 
@@ -485,7 +486,7 @@ LLM の前後に検査を置く。入力側は「外部の文章をデータと�
 | `CONFIG["summary_chars"]` / `summary_chars_multi` | `config.py` | 300 / 400 | 要約の字数（1本の話題／複数本をまとめる話題の上限） |
 | `CONFIG["summary_max_articles"]` / `summary_fetch_body` / `summary_scope` | `config.py` | 4 / true / all | 横断する記事の上限、本文を取りに行くか、付録まで要約するか（all / selected） |
 | `CONFIG["model"]` | `config.py` | `openai:gpt-4.1-mini` | 計画・抽出・採点・要約に使う LLM（1回の呼び出しは60秒で打ち切り、2回まで再試行） |
-| `CONFIG["price_per_1m_input"]` / `price_per_1m_output` | `config.py` | 60 / 240 | LLM の料金（円／100万トークン、gpt-4.1-mini を 1 ドル 150 円で換算）。F-18 の費用の目安にだけ使う |
+| `CONFIG["price_per_1m_input"]` / `price_per_1m_output` | `config.py` | 60 / 240 | LLM の料金（円／100万トークン、gpt-4.1-mini を 1 ドル 150 円で換算）。F-18 の費用の目安にだけ使う。config.yaml に書いていなければ同梱の既定値を使う |
 | `CONFIG["embed_model"]` | `config.py` | `openai:text-embedding-3-small` | 話題のまとめの埋め込み |
 | `CONFIG["entity_llm"]` | `config.py` | True | 固有名詞・キーワード・カテゴリの抽出に LLM も使うか |
 | `CONFIG["sources"]` | `config.py` | Inoreader 保存済み1件 | 取得元の一覧（F-01 の表） |
