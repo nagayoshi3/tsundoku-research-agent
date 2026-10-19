@@ -6,7 +6,7 @@ from collections import Counter
 from langgraph.types import Send
 
 from tsundoku.config import CONFIG, log
-from tsundoku.guardrails import wrap_untrusted
+from tsundoku.guardrails import wrap_related, wrap_untrusted
 from tsundoku.llm import structured_call
 from tsundoku.models import ResearchState, Score
 from tsundoku.prompts import SCORE_PROMPT
@@ -40,9 +40,7 @@ def score_candidate(c: dict, theme: str, plan: dict) -> dict:
     others = [r for r in c.get("related", []) if r["why"] != "同じ ID"]  # 同じ話題を書いた他の記事（URL 違いは除く）
     user = f"id={c['id']} の話題を採点してください。カテゴリ: {c.get('category') or '（なし）'}\n{wrap_untrusted(c)}"
     if others:
-        user += f"\n同じ話題を書いた他の記事（{len(others)}本）:\n" + "\n".join(
-            f"- {r['title'][:120]}" for r in others[:10]
-        )
+        user += f"\n同じ話題を書いた他の記事（{len(others)}本）:\n" + wrap_related([r["title"][:120] for r in others[:10]])
     s = structured_call(Score, system, user)
     s.id = c["id"]
     return s.model_dump()

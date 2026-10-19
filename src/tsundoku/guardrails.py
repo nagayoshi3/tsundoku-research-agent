@@ -19,6 +19,16 @@ def wrap_untrusted(c: dict) -> str:
     return f'<paper id="{c["id"]}">\nTITLE: {c["title"]}\nABSTRACT: {c["abstract"]}\n</paper>'
 
 
+def wrap_related(titles: list[str]) -> str:
+    # 同じ話題の他の記事のタイトル（外部の文章）を、データとして <related> で囲む。改行や囲みのタグで抜け出せないようにする
+    lines = []
+    for t in titles:
+        t = re.sub(r"[\x00-\x1f]+", " ", t or "")
+        t = re.sub(r"<(/?)(paper|related)", r"&lt;\1\2", t, flags=re.IGNORECASE)
+        lines.append(f"- {t}")
+    return "<related>\n" + "\n".join(lines) + "\n</related>"
+
+
 def check_report(selected: list[str], pool: list[dict]) -> list[str]:
     known = {c["id"]: c for c in pool}
     flags = []
