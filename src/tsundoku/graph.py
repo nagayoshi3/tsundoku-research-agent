@@ -12,7 +12,7 @@ from tsundoku.nodes.cluster import cluster_topics
 from tsundoku.nodes.fetch import fetch_source, merge, route_sources
 from tsundoku.nodes.planning import approve_plan, plan
 from tsundoku.nodes.report import report
-from tsundoku.nodes.review import review, route_after_review
+from tsundoku.nodes.review import confirm_empty, review, route_after_review
 from tsundoku.nodes.scoring import route_scoring, score_one, shortlist
 from tsundoku.nodes.summarize import summarize
 
@@ -45,6 +45,7 @@ def build_graph(checkpointer=None):
     g.add_node("score_one", score_one, retry_policy=RetryPolicy(max_attempts=3))  # Send で論文ごとに並列
     g.add_node("shortlist", timed("shortlist", shortlist))
     g.add_node("review", review)  # 停止：承認②
+    g.add_node("confirm_empty", confirm_empty)  # 停止：読むものが0件のとき、次を見るか聞く
     g.add_node(
         "summarize",
         timed("summarize", summarize),
@@ -63,6 +64,11 @@ def build_graph(checkpointer=None):
     g.add_edge("shortlist", "review")
     g.add_conditional_edges(
         "review",
+        route_after_review,
+        {"shortlist": "shortlist", "confirm_empty": "confirm_empty", "summarize": "summarize"},
+    )
+    g.add_conditional_edges(
+        "confirm_empty",
         route_after_review,
         {"shortlist": "shortlist", "summarize": "summarize"},
     )

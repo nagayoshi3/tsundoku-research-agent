@@ -157,34 +157,32 @@ def review(state: ResearchState) -> dict:
             "shown": shown,
             "review_action": "next",
         }
-    if not selected:
-        # 全部除外で次点もない（または全件表示のとき）：終えるか、次を見るかを聞く
-        choice = (
-            interrupt(
-                {
-                    "type": "question",
-                    "message": "読むものが0件です。次の候補を出しますか？",
-                    "options": ["next", "end"],
-                }
-            )
-            or {}
-        )
-        if choice.get("action") == "next" and remaining > 0:
-            return {
-                **extra,
-                "feedback": feedback,
-                "selected": selected,
-                "shown": shown,
-                "review_action": "next",
-            }
+    # 全部除外で次点もない（または全件表示のとき）は confirm_empty で聞く。ここで2回目の interrupt をすると、
+    # 再開時にこのノードが頭からやり直され、まとめた話題の採点（LLM）がもう一度走るため、ノードを分けている
     return {
         **extra,
         "feedback": feedback,
         "selected": selected,
         "shown": shown,
-        "review_action": "done",
+        "review_action": "done" if selected else "ask",
     }
 
 
+def confirm_empty(state: ResearchState) -> dict:
+    """読むものが0件のとき：終えるか、次の候補を見るかを聞く（停止）。"""
+    choice = (
+        interrupt(
+            {
+                "type": "question",
+                "message": "読むものが0件です。次の候補を出しますか？",
+                "options": ["next", "end"],
+            }
+        )
+        or {}
+    )
+    remaining = len(state["pool"]) - len(set(state.get("shown", [])))
+    return {"review_action": "next" if choice.get("action") == "next" and remaining > 0 else "done"}
+
+
 def route_after_review(state: ResearchState) -> str:
-    return "shortlist" if state["review_action"] == "next" else "summarize"
+    return {"next": "shortlist", "ask": "confirm_empty"}.get(state["review_action"], "summarize")

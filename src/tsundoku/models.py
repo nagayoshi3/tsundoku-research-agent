@@ -91,7 +91,7 @@ class ResearchState(TypedDict, total=False):
     merge_hints: list[dict]  # 承認②で推薦する「同じ話題かもしれない」組み合わせ（{a, b, score, why}）。human_merge.py
     selected: list[str]
     feedback: dict  # 承認②の記録 = 評価データ（proposed / approved / rejected / added / merges）
-    review_action: Literal["done", "next", "end"]
+    review_action: Literal["done", "next", "ask", "end"]
     summaries: dict  # 読むと決めた話題の要約（id → {text, sources_used, articles}）。summarize.py
     # 横断
     guardrail_flags: Annotated[list[str], operator.add]

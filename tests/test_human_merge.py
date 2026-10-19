@@ -99,3 +99,49 @@ def test_report_merges_old_records_without_final(state, tmp_path, monkeypatch):
     state["feedback"]["merges"] = [{"into": "a", "merged": ["x"]}, {"into": "a", "merged": ["y", "z"]}]
     md = report(_report_state(state))["report_md"]
     assert "- 承認②で人がまとめた話題: 2 組（T a ← 3）" in md
+
+
+def test_resume_from_empty_question_does_not_rescore(state, monkeypatch):
+    # 全部除外して「次の候補を出すか」で止まり、そこから再開しても、まとめた話題の採点（LLM）は1回だけ
+    import operator
+    from typing import Annotated, TypedDict
+
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.types import Command
+
+    import tsundoku.nodes.review as rv
+    from tsundoku.config import CONFIG
+
+    calls = []
+    monkeypatch.setattr(hm, "score_candidate", lambda m, theme, plan: calls.append(m["id"]) or _score(m["id"], 1))
+    monkeypatch.setitem(CONFIG, "backfill", False)
+
+    class S(TypedDict, total=False):
+        pool: list
+        scored: Annotated[list, operator.add]
+        shortlist: list
+        shown: list
+        selected: list
+        summaries: dict
+        theme: str
+        approved_plan: dict
+        feedback: dict
+        review_action: str
+
+    g = StateGraph(S)
+    g.add_node("review", rv.review)
+    g.add_node("confirm_empty", rv.confirm_empty)
+    g.add_edge(START, "review")
+    route = {"shortlist": END, "confirm_empty": "confirm_empty", "summarize": END}
+    g.add_conditional_edges("review", rv.route_after_review, route)
+    g.add_conditional_edges("confirm_empty", rv.route_after_review, route)
+    app = g.compile(checkpointer=MemorySaver())
+    cfg = {"configurable": {"thread_id": "t"}}
+
+    app.invoke({**state, "selected": [], "feedback": None}, cfg)
+    app.invoke(Command(resume={"approve_all": True, "merge": [["a", "b"]], "reject": {i: "x" for i in "abcd"}}), cfg)
+    assert app.get_state(cfg).next == ("confirm_empty",)
+    out = app.invoke(Command(resume={"action": "end"}), cfg)
+    assert calls == ["a"]  # まとめた話題を1回だけ採点し直す（2回目の再開で走らない）
+    assert out["review_action"] == "done"
