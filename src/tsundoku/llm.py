@@ -1,9 +1,12 @@
 """LLM の呼び出し（構造化出力）と、API を使わない決定的な偽 LLM。"""
 
+import functools
 import hashlib
 import threading
 
-from tsundoku.config import CONFIG, settings
+import yaml
+
+from tsundoku.config import CONFIG, DEFAULT_CONFIG_PATH, settings
 from tsundoku.models import EntityBatch, Plan, Score, Suggestion, Summary
 
 FAKE_TOKENS = (1000, 200)  # 偽LLMが1回の呼び出しで使ったことにする入力・出力のトークン数
@@ -28,11 +31,18 @@ def reset_tokens() -> None:
         _tokens["input"] = _tokens["output"] = 0
 
 
+@functools.cache
+def _default_prices() -> dict:
+    with open(DEFAULT_CONFIG_PATH, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return {k: data[k] for k in ("price_per_1m_input", "price_per_1m_output")}
+
+
 def cost_jpy(usage: dict) -> float:
-    # 100万トークンあたりの円（default_config.yaml の price_per_1m_input / price_per_1m_output）
-    return (
-        usage["input"] * CONFIG.get("price_per_1m_input", 0) + usage["output"] * CONFIG.get("price_per_1m_output", 0)
-    ) / 1_000_000
+    # 100万トークンあたりの円。load_config は default_config.yaml と合わせないので、
+    # 料金を書いていない config.yaml（以前からのもの）では同梱の値を使う（0 円と出さないため）
+    price = {k: CONFIG.get(k, v) for k, v in _default_prices().items()}
+    return (usage["input"] * price["price_per_1m_input"] + usage["output"] * price["price_per_1m_output"]) / 1_000_000
 
 
 def structured_call(schema, system: str, user: str):
