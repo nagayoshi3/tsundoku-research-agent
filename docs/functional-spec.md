@@ -21,8 +21,7 @@
 
 ## 2. 機能一覧
 
-グラフの12ノードは F-02〜F-12 と F-17 に対応し、F-01・F-13〜F-16 はノードの外側（設定、横断、実行の入口）にある。
-
+グラフの12ノードは F-02〜F-12 と F-17 に対応し、F-01・F-13〜F-16・F-18 はノードの外側（設定、横断、実行の入口）にある。
 | ID | 機能 | ノード・関数 | LLM | 優先度 | モジュール |
 |---|---|---|---|---|---|
 | F-01 | 設定とキー管理 | `CONFIG`、`load_secret()` | — | 必須 | `config.py` |
@@ -42,6 +41,7 @@
 | F-15 | 対話実行 | `run_interactive`、`ask`、`default_period` | — | 必須 | `cli.py` |
 | F-16 | デモと動作確認 | `tsundoku demo`、`tests/test_pipeline.py` | 偽 LLM | 必須 | `__main__.py`、`tests/` |
 | F-17 | 要約 | `summarize`、`fetch_body` | 使う | 必須 | `nodes/summarize.py` |
+| F-18 | 実行コストの記録 | `count_tokens`、`metrics["tokens"]`、`metrics["cost_jpy"]` | — | 必須 | `llm.py`、`nodes/report.py` |
 | （任意） | RSS 取得 | `fetch_rss` | — | 任意 | `sources/__init__.py` |
 
 ## 3. F-01 設定とキー管理
@@ -389,6 +389,18 @@ LLM の前後に検査を置く。入力側は「外部の文章をデータと�
 | デモ `tests/` | 新しい接続・新しいグラフで再開し、承認3本・却下1本（既読）・追加1本で確定。RoboMind-2 の記事が必ず確定に入るようにする。レポートと指標を表示 |
 | 動作確認 `tests/` | 要件定義書第12章の A-01〜A-12 を `assert` で確かめ、1つでも外れるとエラーで止まる。通れば `OK: すべての確認が通りました` |
 | 前提 | 初期設定（偽 LLM・サンプル）で入力なし・ネットワークなしで通る（`graph.py` の図の描画だけはネットワークが要り、失敗しても先へ進む） |
+
+
+### F-18 実行コストの記録
+
+| 項目 | 内容 |
+|---|---|
+| 入力 | 各 LLM 呼び出しの入力・出力トークン数（structured_call の戻りから取る） |
+| 処理 | 呼び出しごとに数えて合計。並列（score_one、summarize）でも壊れないようにロックを使う |
+| 出力 | metrics["tokens"]（入力・出力の合計）と metrics["cost_jpy"]。レポートの「選定の記録」に「- LLM トークン: 入力 N ・ 出力 M（約 X 円）」の行 |
+| 設定 | default_config.yaml に price_per_1m_input / price_per_1m_output（円） |
+| 受け入れ条件 | デモ（偽 LLM）でも metrics["tokens"] が 0 より大きく、report_md に「LLM トークン」を含む行がある。偽 LLM は固定のトークン数を返す |
+
 
 ## 13. データ要件 `models.py`
 
