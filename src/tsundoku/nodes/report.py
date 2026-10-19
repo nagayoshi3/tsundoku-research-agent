@@ -421,11 +421,12 @@ def report(state: ResearchState) -> dict:
         for n, v in state.get("funnel", {}).items()
     ]
     if fb.get("merges"):
+        absorbed: dict[str, int] = {}  # 連鎖してまとめても、今残っている話題ごとに数える（final がない古い記録は into）
+        for m in fb["merges"]:
+            absorbed[m.get("final", m["into"])] = absorbed.get(m.get("final", m["into"]), 0) + len(m["merged"])
         L.append(
             f"- 承認②で人がまとめた話題: {len(fb['merges'])} 組（"
-            + "、".join(
-                f"{pool[m['into']]['title'][:30]} ← {len(m['merged'])}" for m in fb["merges"] if m["into"] in pool
-            )
+            + "、".join(f"{pool[k]['title'][:30]} ← {n}" for k, n in absorbed.items() if k in pool)
             + "）"
         )
     L += [f"- 取れなかった取得元: {f}" for f in state.get("failed_sources", [])]

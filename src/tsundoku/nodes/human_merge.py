@@ -143,6 +143,7 @@ def apply_merges(state: dict, groups: list[list[str]]) -> tuple[dict, dict[str, 
             "approved": remap(prev["approved"]),
             "added": remap(prev["added"]),
             "rejected": {resolve(k): v for k, v in prev["rejected"].items()},
-            "merges": prev.get("merges", []) + records,
+            # into は記録した時点の行き先（履歴）。final は後のまとめでさらに吸収された先までたどった、今残っている id
+            "merges": [{**m, "final": resolve(m.get("final", m["into"]))} for m in prev.get("merges", []) + records],
         },
     }, {i: resolve(i) for i in alias}  # 呼び出し元は1段引くだけで済むように、たどった先を返す
