@@ -46,6 +46,11 @@ model: "openai:gpt-4.1-mini"
 embed_model: "openai:text-embedding-3-small"
 entity_llm: true          # true: 固有名詞の抜き出しに規則＋LLM（25件ずつ）。false: 規則だけ
 
+# LLM の料金（円／100万トークン）。レポートの「選定の記録」に出す費用の目安の計算にだけ使う。model を変えたら合わせて直す
+# 既定は gpt-4.1-mini（入力 $0.40・出力 $1.60）を 1 ドル 150 円で換算。埋め込みの費用は含めない
+price_per_1m_input: 60
+price_per_1m_output: 240
+
 # 取得元（type は sources/ で @register した名前：inoreader_api / rss）。limit は読み込む上限、quota は採点に回す枠の配分（取得元が複数のとき）
 sources:
   - name: inoreader-saved

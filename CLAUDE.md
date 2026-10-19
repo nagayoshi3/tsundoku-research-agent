@@ -39,7 +39,7 @@ tsundoku graph                     # 配線を Mermaid で出す（README の図
 
 ### 設定とグローバル状態（`config.py`）
 - `CONFIG`（設定の dict）と `settings`（`fake_llm`、`sample_data`、`workdir` など）はモジュールレベルのグローバル変数。import した時点で既定値が読み込まれる。CLI・Colab・テストの入口はどれも `setup()`。
-- 偽 LLM とサンプルデータは `settings` の値で切り替わる。新たに LLM を呼ぶ処理は必ず `llm.structured_call(schema, system, user)` を通し、`llm._fake` にその schema 用の決定的な応答を足す（足さないと `ValueError`）。埋め込みも同じく、偽 LLM のときは `cluster._fake_embed` を使う。
+- 偽 LLM とサンプルデータは `settings` の値で切り替わる。新たに LLM を呼ぶ処理は必ず `llm.structured_call(schema, system, user)` を通し、`llm._fake` にその schema 用の決定的な応答を足す（足さないと `ValueError`）。トークン数も `structured_call` の中で `count_tokens` が数え（ロック付きのプロセス内の合計。`run_interactive` の頭で `reset_tokens`）、report が `metrics["tokens"]`・`metrics["cost_jpy"]` にする。埋め込みも同じく、偽 LLM のときは `cluster._fake_embed` を使う。
 - プロンプトは `prompts.py` にまとめる。記事の本文・タイトルは外部の文章なので、LLM に渡すときは `guardrails.wrap_untrusted`（データとして囲む）か `sanitize_abstract` を通す。同じ話題の他の記事のタイトルを並べるときは `wrap_related`（`<related>` で囲む）を使う。レポートは `check_report` で、出てくるものが実在するか照合する。
 
 ### 取得元（`sources/`）

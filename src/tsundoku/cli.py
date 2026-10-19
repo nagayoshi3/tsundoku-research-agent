@@ -9,6 +9,7 @@ from langgraph.types import Command
 from tsundoku.checkpoint import open_checkpointer, sync_checkpoint
 from tsundoku.config import CONFIG, log, log_start, settings
 from tsundoku.graph import build_graph
+from tsundoku.llm import reset_tokens
 from tsundoku.periods import normalize_period, period_label
 from tsundoku.sources.inoreader import inoreader_token
 
@@ -129,6 +130,7 @@ def ask(value: dict) -> dict:
 def run_interactive(mode: str = "weekly", period: str | int | None = None, fresh: bool = False):
     # fresh=True：その期間の途中経過・完了済みの結果を捨てて最初からやり直す（採点のやり直し、設定変更の反映に）
     period = normalize_period(mode, period)  # 日付・last・-1 などを内部の形にそろえる
+    reset_tokens()  # トークン数は実行ごとに数え直す（Colab で同じプロセスから何度も実行するため）
     log_start(os.path.join(settings.workdir, f"log-{mode}-{period}.txt"))  # 実行ログをファイルにも残す
     log(f"期間: {period_label(mode, period)}")
     if settings.fake_llm or settings.sample_data:

@@ -485,6 +485,7 @@ LLM の前後に検査を置く。入力側は「外部の文章をデータと�
 | `CONFIG["summary_chars"]` / `summary_chars_multi` | `config.py` | 300 / 400 | 要約の字数（1本の話題／複数本をまとめる話題の上限） |
 | `CONFIG["summary_max_articles"]` / `summary_fetch_body` / `summary_scope` | `config.py` | 4 / true / all | 横断する記事の上限、本文を取りに行くか、付録まで要約するか（all / selected） |
 | `CONFIG["model"]` | `config.py` | `openai:gpt-4.1-mini` | 計画・抽出・採点・要約に使う LLM（1回の呼び出しは60秒で打ち切り、2回まで再試行） |
+| `CONFIG["price_per_1m_input"]` / `price_per_1m_output` | `config.py` | 60 / 240 | LLM の料金（円／100万トークン、gpt-4.1-mini を 1 ドル 150 円で換算）。F-18 の費用の目安にだけ使う |
 | `CONFIG["embed_model"]` | `config.py` | `openai:text-embedding-3-small` | 話題のまとめの埋め込み |
 | `CONFIG["entity_llm"]` | `config.py` | True | 固有名詞・キーワード・カテゴリの抽出に LLM も使うか |
 | `CONFIG["sources"]` | `config.py` | Inoreader 保存済み1件 | 取得元の一覧（F-01 の表） |

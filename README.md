@@ -129,6 +129,7 @@ tsundoku run monthly 2026-09             # 月次
 | `ask_plan` | 承認①で止めるか | true |
 | `summary_chars` / `summary_chars_multi` / `summary_scope` | 要約の字数（1本／複数本）／付録まで要約するか（all / selected） | 300 / 400 / all |
 | `model` / `embed_model` | LLM と埋め込み（langchain の `init_chat_model` 形式） | gpt-4.1-mini / text-embedding-3-small |
+| `price_per_1m_input` / `price_per_1m_output` | LLM の料金（円／100万トークン）。レポートの「選定の記録」に出す費用の目安に使う（埋め込みは含めない）。`model` を変えたら合わせる | 60 / 240 |
 
 API キーは `.env` か環境変数（`OPENAI_API_KEY`、`INOREADER_APP_ID`、`INOREADER_APP_KEY`。任意で `LANGSMITH_API_KEY`）。
 

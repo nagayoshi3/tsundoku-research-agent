@@ -11,6 +11,7 @@ from docx.shared import Cm, Pt, RGBColor
 
 from tsundoku.config import log, settings
 from tsundoku.guardrails import check_report
+from tsundoku.llm import cost_jpy, token_usage
 from tsundoku.models import ResearchState
 from tsundoku.nodes.cluster import headline_groups
 from tsundoku.nodes.fetch import keyword_hits
@@ -288,6 +289,7 @@ def report(state: ResearchState) -> dict:
         "added": [],
     }
     flags = check_report(state.get("selected", []), state["pool"])
+    usage = token_usage()
     metrics = {
         "fetched": len(state.get("candidates", [])),  # 期間内に保存した記事
         "topics": len(state.get("topics", [])),  # 話題をまとめた後の件数
@@ -297,6 +299,10 @@ def report(state: ResearchState) -> dict:
         "failed_sources": len(state.get("failed_sources", [])),
         "guardrail_flags": len(state.get("guardrail_flags", [])) + len(flags),
         "funnel": state.get("funnel", {}),  # 取得元ごとの読んだ件数と採点件数
+        "tokens": usage["input"] + usage["output"],  # この実行で LLM に使ったトークン（入力＋出力）
+        "tokens_input": usage["input"],
+        "tokens_output": usage["output"],
+        "cost_jpy": round(cost_jpy(usage), 1),  # 料金の設定から出した目安（埋め込みは含めない）
     }
     span = "週次" if state["mode"] == "weekly" else "月次"
     L = [
@@ -416,6 +422,7 @@ def report(state: ResearchState) -> dict:
         "## 選定の記録",
         f"- 取得 {metrics['fetched']} → 話題 {metrics['topics']} → 採点対象 {metrics['pool']} → 提示 {len(fb['proposed'])} → 確定 {len(state.get('selected', []))}",
         f"- 採用率 {metrics['adoption_rate']}（提示のうち除外しなかった割合）・追加 {metrics['added']}・取得失敗 {metrics['failed_sources']}・ガード検出 {metrics['guardrail_flags']}",
+        f"- LLM トークン: 入力 {usage['input']:,} ・ 出力 {usage['output']:,}（約 {metrics['cost_jpy']} 円）",
     ]
     L += [
         f"- {n}: 読んだ {v['read']} → 話題 {v['topics']} → 採点 {v['scored']}"
@@ -444,6 +451,6 @@ def report(state: ResearchState) -> dict:
         log(f"⚠ Word 版の作成に失敗（Markdown は保存済み）: {e}")
     log(
         f"[report] 取得 {metrics['fetched']} → 話題 {metrics['topics']} → 採点対象 {metrics['pool']} → 提示 {len(fb['proposed'])} → 確定 {len(state.get('selected', []))}"
-        f"／採用率 {metrics['adoption_rate']} → {base}.md"
+        f"／採用率 {metrics['adoption_rate']}／LLM 約 {metrics['cost_jpy']} 円 → {base}.md"
     )
     return {"report_md": md_text, "metrics": metrics, "guardrail_flags": flags}

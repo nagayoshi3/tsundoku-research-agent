@@ -17,6 +17,7 @@ from langgraph.types import Command
 from tsundoku.config import CONFIG, log_start, settings, setup
 from tsundoku.graph import build_graph
 from tsundoku.guardrails import check_report
+from tsundoku.llm import FAKE_TOKENS, cost_jpy, reset_tokens
 from tsundoku.nodes.cluster import SAME_TOPIC, title_part, topic_score
 from tsundoku.nodes.fetch import allocate
 from tsundoku.nodes.report import report
@@ -40,6 +41,7 @@ def demo(tmp_path_factory):
     """デモの流れを最後まで動かし、最終状態と途中の値を返す。"""
     work = str(tmp_path_factory.mktemp("work"))
     setup(fake_llm=True, sample_data=True, workdir=work, quiet=True)
+    reset_tokens()  # 他のテストで呼んだ偽 LLM の分を数えない
     # サンプル記事に合わせた設定：目安10件・しきい値は自動・次点埋めなし・付録まで・キーワード3語
     CONFIG.update(
         shortlist_size=10,
@@ -215,6 +217,16 @@ def test_report_tolerates_old_scores(demo):
         "scored": [{k: v for k, v in s.items() if k not in ("summary_ja", "title_ja")} for s in final["scored"]],
     }
     assert "## 全話題" in report(old)["report_md"]
+
+
+def test_token_cost(demo):
+    """偽 LLM でもトークン数を数え、レポートの「選定の記録」に費用の目安が出る（F-18）。"""
+    m = demo["final"]["metrics"]
+    assert m["tokens"] > 0 and m["tokens"] == m["tokens_input"] + m["tokens_output"]
+    calls = m["tokens_input"] // FAKE_TOKENS[0]  # 偽 LLM は1回あたり固定のトークン数
+    assert (m["tokens_input"], m["tokens_output"]) == (calls * FAKE_TOKENS[0], calls * FAKE_TOKENS[1])
+    assert m["cost_jpy"] == round(cost_jpy({"input": m["tokens_input"], "output": m["tokens_output"]}), 1)
+    assert any(line.startswith("- LLM トークン: 入力 ") for line in demo["final"]["report_md"].splitlines())
 
 
 # --- 純粋関数の確認（グラフを動かさない）--------------------------------------------------------
