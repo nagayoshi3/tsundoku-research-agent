@@ -17,7 +17,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "if [ \"$(jq -r '.stop_hook_active')\" = \"true\" ]; then exit 0; fi; cd \"$CLAUDE_PROJECT_DIR\" && out=$(OPENAI_API_KEY=dummy python -m pytest -q -x 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then echo \"$out\" | tail -20 >&2; exit 2; fi; exit 0"
+              "command": "if [ \"$(jq -r '.stop_hook_active')\" = \"true\" ]; then exit 0; fi; cd \"$CLAUDE_PROJECT_DIR\" && out=$(OPENAI_API_KEY=dummy conda run -n tsundoku python -m pytest -q -x 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then echo \"$out\" | tail -20 >&2; exit 2; fi; exit 0"
             }
           ]
         }
