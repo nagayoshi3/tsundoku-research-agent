@@ -46,7 +46,7 @@ tsundoku graph                     # 配線を Mermaid で出す（README の図
 - 記事 ID は arXiv の ID か、`normalize_url` で正規化した URL（重複除去のキー）。
 
 ### 話題のまとめ（`nodes/cluster.py`、`nodes/human_merge.py`）
-埋め込みのコサイン類似度、話題キーワード、見出しの固有名詞を組み合わせた `topic_score` で同じ話題かを判定する。しきい値はファイル先頭の定数（`SAME_TOPIC`、`VETO_COS`、`NEAR_TOPIC`、`NEAR_COS` など）。まとめた記事は代表の記事の `related` に入る。`human_merge.py` は、自動ではまとめなかった近い組み合わせを承認②で推薦し、人がまとめた話題を採点し直す。
+埋め込みのコサイン類似度、話題キーワード、見出しの固有名詞を組み合わせた `topic_score` で同じ話題かを判定する。しきい値はそれぞれのファイル先頭の定数（自動でまとめる判定は `cluster.py` の `SAME_TOPIC`、`VETO_COS` など、承認②で推薦する判定は `human_merge.py` の `NEAR_TOPIC`、`NEAR_COS`）。まとめた記事は代表の記事の `related` に入る。`human_merge.py` は、自動ではまとめなかった近い組み合わせを承認②で推薦し、人がまとめた話題を採点し直す。
 
 ### 出力（`nodes/report.py`）
 `settings.workdir` にレポート（.md/.docx）、記事1本1行の経路の記録 `*-trace.csv`（段階は `STAGES`）、記事 CSV、統計 JSON、実行ログを書き出す。古いチェックポイントのスコアでも動くように書かれている（`test_report_tolerates_old_scores`）。
