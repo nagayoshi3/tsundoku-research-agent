@@ -21,7 +21,7 @@
 
 ## 2. 機能一覧
 
-グラフの11ノードは F-02〜F-12 と F-17 に対応し、F-01・F-13〜F-16 はノードの外側（設定、横断、実行の入口）にある。
+グラフの12ノードは F-02〜F-12 と F-17 に対応し、F-01・F-13〜F-16 はノードの外側（設定、横断、実行の入口）にある。
 
 | ID | 機能 | ノード・関数 | LLM | 優先度 | モジュール |
 |---|---|---|---|---|---|
@@ -35,7 +35,7 @@
 | F-08 | 枠の配分 | `merge`、`allocate`、`keyword_hits` | — | 必須 | `nodes/fetch.py` |
 | F-09 | 話題の採点 | `route_scoring`、`score_one` | 使う | 必須 | `nodes/scoring.py` |
 | F-10 | 上位選定 | `shortlist` | — | 必須 | `nodes/scoring.py` |
-| F-11 | 承認② | `review`、`route_after_review`、`merge_hints`、`apply_merges` | まとめた話題の採点し直しだけ | 必須 | `nodes/review.py`、`nodes/human_merge.py` |
+| F-11 | 承認② | `review`、`confirm_empty`、`route_after_review`、`merge_hints`、`apply_merges` | まとめた話題の採点し直しだけ | 必須 | `nodes/review.py`、`nodes/human_merge.py` |
 | F-12 | レポート | `report`、`stats_md` | — | 必須 | `nodes/report.py` |
 | F-13 | ガードレール | `sanitize_abstract`、`wrap_untrusted`、`check_report` | — | 必須 | `guardrails.py` |
 | F-14 | 状態保存と再開 | `build_graph`、SqliteSaver、interrupt | — | 必須 | `graph.py` |
@@ -251,11 +251,11 @@ aggregate は cluster_topics の直後に動き、期間内に保存した記事
 |---|---|
 | 入力 | State の `shortlist`、`pool`、`scored`、前回までの `feedback`・`selected`・`shown`。再開値（下表） |
 | 提示内容 | 1本につき id、タイトル（日本語訳と原題）、点数の内訳「合計N ＝ 関連度a ＋ 新規性b ＋ 注目度c ＋ 媒体+d」、基準ごとの「点数/5: 理由」（detail）、総評（reason）、要旨（summary_ja）、要旨の冒頭160字、同じ話題の記事数（related）、カテゴリ（category）、媒体（なければ取得元名）。提示はカテゴリ別（提示する話題の多い順）→ 合計点順。同じ主語（見出しの固有名詞。例: muse）を持つ話題は1つの項目（members）にまとめ、取捨選択の単位にする |
-| 処理 | (1) `interrupt({"type": "review", "message": …, "shortlist": items, "merge_hints": [...]})` で止まる（推薦にはタイトルを添える）。(1b) 再開値の `merge`（id のリストのリスト）を `apply_merges()` で先に反映する：各組で合計点が最も高い話題（同点なら提示順で先）を残し、他の話題は代表ごと `related` の先頭に入れる（`why` = 「人がまとめた（承認②）」）。固有名詞・キーワードを合わせ、まとめた話題を1件として `score_candidate()` で採点し直す（LLM 1回。`scored` には追記され、id で引くときは後のものが勝つ）。pool・topics・shortlist・shown・selected・feedback の id を残した話題に読み替え、古い要約を消す（summarize が横断して書き直す）。以降の reject / approve の id も読み替える。(2) 再開値を検証：除外（reject）は shortlist にある id だけ（理由は任意。空なら「理由なし」）。approve_all が True なら提示から除外分を引いたものが承認、False なら approve の id 指定（デモ・テスト用）。追加は採点対象（pool）にある話題だけで、代表の id・URL か、同じ話題にまとめた記事の URL（正規化して照合）で指定できる。それ以外は捨てる。(3) `feedback = {proposed, approved, rejected, added, merges}` を前回分と合算して記録し、`selected` に承認＋追加を足し、`shown` に今回提示した id を足す。(4) 次点補充（backfill）：`CONFIG["backfill"]` が True、`shortlist_size` > 0、確定が目標に届かず、今回除外があり、未提示の話題が残っていれば `review_action = "next"`（shortlist に戻り、不足分だけ提示する）。(5) 確定が0件で追加もなければ `interrupt({"type": "question", "options": ["next", "end"]})` で「次の候補を出すか」を聞く。(6) それ以外は `review_action = "done"` |
-| 全却下の分岐 | 確定0件のとき：`next` → `review_action = "next"`（shortlist に戻り、未提示から改めて提示）。`end` → `selected = []`、`review_action = "end"`（report へ）。除外があって未提示が残る通常の場合は聞かずに `next` |
-| 出力 | `feedback`、`selected`、`shown`、`review_action`。人がまとめたときは `pool`、`topics`、`scored`（追記）、`shortlist`、`summaries` も |
-| 行き先 | `route_after_review`：`next` なら shortlist、それ以外は report |
-| 制約 | 1つのノードに interrupt が2つある。再開値は出た順番で対応するため、条件分岐で interrupt の数や順番が変わる書き方をしない。`scored` は追記型なので吸収した話題の古い採点は残る（pool にないので shortlist・report では使われない） |
+| 処理 | (1) `interrupt({"type": "review", "message": …, "shortlist": items, "merge_hints": [...]})` で止まる（推薦にはタイトルを添える）。(1b) 再開値の `merge`（id のリストのリスト）を `apply_merges()` で先に反映する：各組で合計点が最も高い話題（同点なら提示順で先）を残し、他の話題は代表ごと `related` の先頭に入れる（`why` = 「人がまとめた（承認②）」）。固有名詞・キーワードを合わせ、まとめた話題を1件として `score_candidate()` で採点し直す（LLM 1回。`scored` には追記され、id で引くときは後のものが勝つ）。pool・topics・shortlist・shown・selected・feedback の id を残した話題に読み替え、古い要約を消す（summarize が横断して書き直す）。以降の reject / approve の id も読み替える。(2) 再開値を検証：除外（reject）は shortlist にある id だけ（理由は任意。空なら「理由なし」）。approve_all が True なら提示から除外分を引いたものが承認、False なら approve の id 指定（デモ・テスト用）。追加は採点対象（pool）にある話題だけで、代表の id・URL か、同じ話題にまとめた記事の URL（正規化して照合）で指定できる。それ以外は捨てる。(3) `feedback = {proposed, approved, rejected, added, merges}` を前回分と合算して記録し、`selected` に承認＋追加を足し、`shown` に今回提示した id を足す。(4) 次点補充（backfill）：`CONFIG["backfill"]` が True、`shortlist_size` > 0、確定が目標に届かず、今回除外があり、未提示の話題が残っていれば `review_action = "next"`（shortlist に戻り、不足分だけ提示する）。(5) 確定が0件で追加もなければ、ここでは止まらず `review_action = "ask"` にする。続く `confirm_empty` が `interrupt({"type": "question", "options": ["next", "end"]})` で止まり「次の候補を出すか」を聞く。(6) それ以外は `review_action = "done"` |
+| 全却下の分岐 | 確定0件のとき（`confirm_empty`）：`next` で未提示が残っていれば `review_action = "next"`（shortlist に戻り、未提示から改めて提示）。`end`、または未提示が残っていなければ `review_action = "done"`（`selected` は空のまま summarize へ）。除外があって未提示が残る通常の場合は聞かずに `next` |
+| 出力 | review：`feedback`、`selected`、`shown`、`review_action`（`next` / `ask` / `done`。提示が0件なら `end`）。confirm_empty：`review_action`（`next` / `done`）だけ。人がまとめたときは `pool`、`topics`、`scored`（追記）、`shortlist`、`summaries` も |
+| 行き先 | `route_after_review`（review と confirm_empty の後で共通）：`next` なら shortlist、`ask` なら confirm_empty、それ以外は summarize |
+| 制約 | review の interrupt は1つだけにする。再開時にノードは頭からやり直されるため、`apply_merges()` の採点し直し（LLM）の後に2つ目の interrupt を置くと採点が二重に走る。0件のときの問いは別ノード `confirm_empty` に置く。`scored` は追記型なので吸収した話題の古い採点は残る（pool にないので shortlist・report では使われない） |
 | 受け入れ条件 | 承認3本・却下1本（理由「既読」）・追加1本・まとめ1組で再開すると `selected == approve + add` になり、吸収した話題は pool・提示・要約から消えて残した話題の `related` 先頭に入り、残した話題は採点し直され、`feedback["merges"]` とレポートの「選定の記録」に残る。サンプル（目安20）で22件提示→1件除外→確定21件（目安以上なので次点なし）。22件提示→7件除外→次点5件提示→除外なしで確定20件（偽 LLM の対話シミュレーションで確認） |
 
 再開値の形。
@@ -345,7 +345,7 @@ LLM の前後に検査を置く。入力側は「外部の文章をデータと�
 
 | 項目 | 内容 |
 |---|---|
-| グラフ | `build_graph(checkpointer)`：`ResearchState` を State にした `StateGraph` に11ノードを登録し、START → fetch_source（Send）→ cluster_topics → aggregate → plan → approve_plan → merge → score_one（Send）または shortlist → shortlist → review → shortlist（次点）または summarize → report → END とつなぐ |
+| グラフ | `build_graph(checkpointer)`：`ResearchState` を State にした `StateGraph` に12ノードを登録し、START → fetch_source（Send）→ cluster_topics → aggregate → plan → approve_plan → merge → score_one（Send）または shortlist → shortlist → review → shortlist（次点）、confirm_empty（読むものが0件）または summarize → report → END とつなぎ、confirm_empty からは shortlist または summarize へつなぐ |
 | 保存 | `SqliteSaver(sqlite3.connect(path, check_same_thread=False))`。thread_id は `{mode}-{period}`（例 `weekly-2026-W41`）。本番は `CONFIG["checkpoint"]`、デモは `checkpoints.demo.sqlite`（毎回作り直す） |
 | 停止 | `interrupt(値)` で止まり、`app.get_state(cfg).interrupts[0].value` から提示内容を取り出せる。`get_state(cfg).next` に止まっているノード名が入る |
 | 再開 | `app.invoke(Command(resume=値), cfg)`。ノードは頭からやり直され、`interrupt()` が渡した値を返す。新しい接続・新しいグラフからでも同じ thread_id で再開できる |
@@ -438,7 +438,7 @@ LLM の前後に検査を置く。入力側は「外部の文章をデータと�
 | `scored` | 連結 | score_one | 並列採点の結果 |
 | `shortlist`、`shown`、`merge_hints` | 上書き | shortlist、review | 今回提示する話題、提示済みの累積、同じ話題かもしれない組の推薦 |
 | `summaries` | 上書き | summarize | 話題 id → {text, sources_used, articles} |
-| `selected`、`feedback`、`review_action` | 上書き | review | 確定分、承認②の記録、次の行き先 |
+| `selected`、`feedback`、`review_action` | 上書き | review（`review_action` は confirm_empty も） | 確定分、承認②の記録、次の行き先（`done` / `next` / `ask` / `end`） |
 | `guardrail_flags` | 連結 | merge、report | 検出したもの |
 | `metrics`、`report_md` | 上書き | report | 指標とレポート本文 |
 

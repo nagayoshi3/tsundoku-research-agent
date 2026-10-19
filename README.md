@@ -21,9 +21,13 @@ graph TD
     merge -.-> shortlist
     shortlist --> review
     review -.->|除外で目安を下回った| shortlist
+    review -.->|読むものが0件| confirm_empty
+    confirm_empty -.->|次の候補を出す| shortlist
+    confirm_empty -.-> summarize
     review -.-> summarize --> report --> E([end])
     style approve_plan fill:#ffe9a8
     style review fill:#ffe9a8
+    style confirm_empty fill:#ffe9a8
 ```
 
 黄色が人の承認で止まるノード。`fetch_source` と `score_one` は `Send` で並列に動きます。

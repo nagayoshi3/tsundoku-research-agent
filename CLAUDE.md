@@ -24,7 +24,7 @@ tsundoku graph                     # 配線を Mermaid で出す（README の図
 ## アーキテクチャ
 
 ### グラフ（`graph.py`）
-`START →(Send で並列) fetch_source → cluster_topics → aggregate → plan → approve_plan ⏸ → merge →(Send で並列) score_one → shortlist → review ⏸ →(除外で目安を下回れば shortlist へ戻る) summarize → report → END`
+`START →(Send で並列) fetch_source → cluster_topics → aggregate → plan → approve_plan ⏸ → merge →(Send で並列) score_one → shortlist → review ⏸ →(除外で目安を下回れば shortlist へ戻る／読むものが0件なら confirm_empty ⏸ → shortlist か summarize) summarize → report → END`
 
 - ノードは `nodes/` に1ファイル1段階で置き、`ResearchState`（`models.py`、TypedDict）を読んで、変えたキーだけを dict で返す。
 - `candidates`、`scored`、`failed_sources`、`guardrail_flags` には `Annotated[list, operator.add]` が付いている。並列ノードの結果は連結されるので、上書きのつもりで返さないこと。
@@ -32,7 +32,8 @@ tsundoku graph                     # 配線を Mermaid で出す（README の図
 - `plan`（LLM の提案）と `approved_plan`（人が確定したもの）は別のキー。承認②の結果は `feedback` に評価データとして残る。
 
 ### 人の承認と再開
-- `approve_plan`（`nodes/planning.py`）と `review`（`nodes/review.py`）は `interrupt()` で止まる。再開時は `Command(resume=...)` で渡した値が `interrupt()` の戻り値になる。承認②に渡す値の形は `{"approve": [...], "reject": {id: 理由}, "add": [...], "merge": [[id, id], ...]}`（例は `tests/test_pipeline.py` の fixture）。
+- `approve_plan`（`nodes/planning.py`）、`review` と `confirm_empty`（`nodes/review.py`）は `interrupt()` で止まる。再開時は `Command(resume=...)` で渡した値が `interrupt()` の戻り値になる。承認②に渡す値の形は `{"approve": [...], "reject": {id: 理由}, "add": [...], "merge": [[id, id], ...]}`（例は `tests/test_pipeline.py` の fixture）。
+- 再開するとノードは頭からやり直される。LLM 呼び出しなどの副作用の後に、同じノードで `interrupt()` を置かない（`review` で `apply_merges` が採点し直した後の「読むものが0件」の問いは、そのため別ノードの `confirm_empty` にある）。
 - `cli.run_interactive` が止まるたびに `cli.ask()` で入力を受け取って再開させる。`cli.AUTO_APPROVE`（`--yes`）が真なら提案をそのまま承認する。
 - thread_id は `"{mode}-{period}"`。チェックポイントは `checkpoint.py` が SQLite に保存し、止まるたびに `sync_checkpoint` で保存先へ複製する（Colab で Google ドライブを使うため。ドライブ上の SQLite を直接開かない）。同じ期間を指定すると続きから再開し、`--fresh` で消してやり直す。採点方法や設定を変えた後に古い結果を使い回さないよう注意。
 
