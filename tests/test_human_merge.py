@@ -182,3 +182,17 @@ def test_merge_ignores_topics_not_in_current_shortlist(state):
     assert alias == {"d": "c"}
     assert {c["id"] for c in extra["pool"]} == {"a", "b", "c"}
     assert extra["selected"] == ["a"]
+
+
+def test_reject_of_absorbed_topic_keeps_merged_topic(state, monkeypatch):
+    """a と b をまとめて b を除外しても、まとめた話題（a）は除外されずに残る。a を除外すれば話題全体が消える。"""
+    import tsundoku.nodes.review as rv
+
+    def run(answer):
+        monkeypatch.setattr(rv, "interrupt", lambda value: answer)  # 承認②の入力をそのまま返す
+        return rv.review({**state, "selected": [], "feedback": None})
+
+    out = run({"approve_all": True, "merge": [["a", "b"]], "reject": {"b": "既読"}})
+    assert "a" in out["selected"] and out["feedback"]["rejected"] == {}
+    out = run({"approve_all": True, "merge": [["a", "b"]], "reject": {"a": "既読"}})
+    assert "a" not in out["selected"] and out["feedback"]["rejected"] == {"a": "既読"}

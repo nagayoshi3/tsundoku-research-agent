@@ -96,9 +96,11 @@ def review(state: ResearchState) -> dict:
         state = {**state, **extra}
         pool = {c["id"]: c for c in state["pool"]}
         prev = extra["feedback"]
-    rejected = {
-        alias.get(k, k): v for k, v in answer.get("reject", {}).items() if alias.get(k, k) in state["shortlist"]
-    }
+    # まとめて吸収された側の除外は無視する（読み替えると、残した側を含む話題全体が消えてしまう）。
+    # 話題全体を除外するときは、残した側の id を指定する
+    rejected = {k: v for k, v in answer.get("reject", {}).items() if k not in alias and k in state["shortlist"]}
+    if ignored_rej := [k for k in answer.get("reject", {}) if k in alias]:
+        log(f"[review] まとめた話題の一部なので除外しなかった: {', '.join(ignored_rej)}")
     if answer.get("approve_all"):  # 提示したものは、除外した分を除いて全部承認（保存済み記事はすでに本人が選んだもの）
         approved = [i for i in state["shortlist"] if i not in rejected]
     else:  # 番号で承認する形（デモや自動テストが使う）
