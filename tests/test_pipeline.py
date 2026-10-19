@@ -3,21 +3,27 @@
 デモの流れ（起動 → 承認① → 採点 → 承認② → 要約 → レポート）と、設計時の確認項目を pytest にしたもの。
 """
 
+import contextlib
 import csv
 import datetime as dt
 import json
 import os
+import re
 import sqlite3
+import threading
 from collections import Counter
 
 import pytest
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
+import tsundoku.llm as llm
 from tsundoku.config import CONFIG, log_start, settings, setup
 from tsundoku.graph import build_graph
 from tsundoku.guardrails import check_report
-from tsundoku.llm import FAKE_TOKENS, cost_jpy, reset_tokens
+from tsundoku.llm import FAKE_TOKENS, cost_jpy, reset_tokens, structured_call, token_usage
+from tsundoku.models import Score
 from tsundoku.nodes.cluster import SAME_TOPIC, title_part, topic_score
 from tsundoku.nodes.fetch import allocate
 from tsundoku.nodes.report import report
@@ -39,6 +45,24 @@ def _always_fail(source, *, mode, period, limit=100):
 @pytest.fixture(scope="module")
 def demo(tmp_path_factory):
     """デモの流れを最後まで動かし、最終状態と途中の値を返す。"""
+    # 偽 LLM の実際の呼び出し回数を数える（トークンの数え方を、回数から逆算せずに突き合わせるため）
+    calls = {"n": 0}
+    lock = threading.Lock()
+    real_fake = llm._fake
+
+    def counting_fake(schema, user):
+        with lock:  # score_one・summarize は並列に呼ばれる
+            calls["n"] += 1
+        return real_fake(schema, user)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(llm, "_fake", counting_fake)
+        result = _run_demo(tmp_path_factory)
+    result["llm_calls"] = calls["n"]
+    return result
+
+
+def _run_demo(tmp_path_factory):
     work = str(tmp_path_factory.mktemp("work"))
     setup(fake_llm=True, sample_data=True, workdir=work, quiet=True)
     reset_tokens()  # 他のテストで呼んだ偽 LLM の分を数えない
@@ -222,11 +246,349 @@ def test_report_tolerates_old_scores(demo):
 def test_token_cost(demo):
     """偽 LLM でもトークン数を数え、レポートの「選定の記録」に費用の目安が出る（F-18）。"""
     m = demo["final"]["metrics"]
-    assert m["tokens"] > 0 and m["tokens"] == m["tokens_input"] + m["tokens_output"]
-    calls = m["tokens_input"] // FAKE_TOKENS[0]  # 偽 LLM は1回あたり固定のトークン数
+    calls = demo["llm_calls"]  # fixture で数えた、偽 LLM の実際の呼び出し回数
+    assert calls > 0 and m["tokens"] > 0 and m["tokens"] == m["tokens_input"] + m["tokens_output"]
+    # 1回の呼び出しにつき固定のトークン数を、ちょうど1回ずつ数えている（二重に数えれば合わない）
     assert (m["tokens_input"], m["tokens_output"]) == (calls * FAKE_TOKENS[0], calls * FAKE_TOKENS[1])
     assert m["cost_jpy"] == round(cost_jpy({"input": m["tokens_input"], "output": m["tokens_output"]}), 1)
-    assert any(line.startswith("- LLM トークン: 入力 ") for line in demo["final"]["report_md"].splitlines())
+    lines = [ln for ln in demo["final"]["report_md"].splitlines() if "LLM トークン" in ln]
+    assert len(lines) == 1
+    hit = re.fullmatch(r"- LLM トークン: 入力 ([\d,]+) ・ 出力 ([\d,]+)（約 ([\d.]+) 円）", lines[0])
+    assert hit, lines[0]
+    n, out, yen = hit.groups()
+    assert int(n.replace(",", "")) == m["tokens_input"] and int(out.replace(",", "")) == m["tokens_output"]
+    assert float(yen) == m["cost_jpy"]
+
+
+# --- F-18：本物の LLM 経路のトークン計数（init_chat_model を偽物に差し替え、API は呼ばない）------------------
+class _FakeChat:
+    def __init__(self, out):
+        self.out = out
+        self.schema = None
+
+    def with_structured_output(self, schema, include_raw=False):
+        assert include_raw  # usage_metadata を受け取るために必須
+        self.schema = schema
+        return self
+
+    def invoke(self, messages):
+        return self.out
+
+
+@pytest.fixture
+def real_llm(monkeypatch):
+    """settings.fake_llm=False にして、init_chat_model が返す応答を差し替えられるようにする。"""
+    import langchain.chat_models
+
+    monkeypatch.setattr(settings, "fake_llm", False)
+    monkeypatch.setitem(CONFIG, "model", "openai:dummy")
+    holder = {}
+
+    def fake_init(model, **kw):
+        return _FakeChat(holder["out"])
+
+    monkeypatch.setattr(langchain.chat_models, "init_chat_model", fake_init)
+    reset_tokens()
+    yield holder
+    reset_tokens()
+
+
+def _raw(usage=True):
+    meta = {"input_tokens": 7, "output_tokens": 3, "total_tokens": 10}
+    return AIMessage(content="", usage_metadata=meta) if usage else AIMessage(content="")
+
+
+def test_real_call_counts_tokens(real_llm):
+    from tsundoku.models import Summary
+
+    parsed = Summary(text="t", sources_used=1)
+    real_llm["out"] = {"raw": _raw(), "parsed": parsed, "parsing_error": None}
+    assert structured_call(Summary, "s", "u") is parsed
+    assert token_usage() == {"input": 7, "output": 3}
+
+
+def test_real_call_parsing_error_still_counted(real_llm):
+    from tsundoku.models import Summary
+
+    err = RuntimeError("bad json")
+    real_llm["out"] = {"raw": _raw(), "parsed": None, "parsing_error": err}
+    with pytest.raises(RuntimeError) as e:
+        structured_call(Summary, "s", "u")
+    assert e.value is err
+    assert token_usage() == {"input": 7, "output": 3}  # 形式が崩れた応答も費用はかかる
+
+
+def test_real_call_empty_parsed_raises(real_llm):
+    from tsundoku.models import Summary
+
+    real_llm["out"] = {"raw": _raw(), "parsed": None, "parsing_error": None}
+    with pytest.raises(ValueError):
+        structured_call(Summary, "s", "u")
+    assert token_usage() == {"input": 7, "output": 3}
+
+
+def test_real_call_without_usage_metadata(real_llm):
+    from tsundoku.models import Summary
+
+    parsed = Summary(text="t", sources_used=1)
+    real_llm["out"] = {"raw": _raw(usage=False), "parsed": parsed, "parsing_error": None}
+    assert structured_call(Summary, "s", "u") is parsed
+    assert token_usage() == {"input": 0, "output": 0}
+
+
+def test_cost_jpy(monkeypatch):
+    monkeypatch.setitem(CONFIG, "price_per_1m_input", 60)
+    monkeypatch.setitem(CONFIG, "price_per_1m_output", 240)
+    # 入力 50万 × 60円/100万 ＋ 出力 10万 × 240円/100万 ＝ 30 ＋ 24 ＝ 54円
+    assert cost_jpy({"input": 500_000, "output": 100_000}) == pytest.approx(54.0)
+
+
+def test_token_cost_in_log(demo):
+    """実行ログの [report] の行に「LLM 約 X 円」が出る（F-18 の出力）。"""
+    log_text = open(os.path.join(demo["work"], "log-demo-weekly-2026-W40.txt"), encoding="utf-8").read()
+    # 後のテスト（期間0件の実行や report の呼び直し）も同じログに追記するので、fixture の実行が書いた最初の行を見る
+    lines = [ln for ln in log_text.splitlines() if "[report] 取得" in ln and "report-weekly-2026-W40.md" in ln]
+    assert lines and f"／LLM 約 {demo['final']['metrics']['cost_jpy']} 円 → " in lines[0]
+
+
+@contextlib.contextmanager
+def _keep_config():
+    """CONFIG・settings・実行ログの行き先・トークン数を、抜けるときに元に戻す（setup を呼ぶテスト用）。"""
+    import copy
+    import dataclasses
+
+    import tsundoku.config as config
+
+    saved_config, saved_settings, saved_log = copy.deepcopy(CONFIG), dataclasses.replace(settings), dict(config._LOG)
+    try:
+        yield
+    finally:
+        CONFIG.clear()
+        CONFIG.update(saved_config)
+        for f in dataclasses.fields(settings):
+            setattr(settings, f.name, getattr(saved_settings, f.name))
+        config._LOG.clear()
+        config._LOG.update(saved_log)
+        reset_tokens()
+
+
+def test_default_config_prices():
+    """default_config.yaml に料金（円／100万トークン）があり、cost_jpy が読むキー名と合っている（F-18 の設定）。"""
+    import yaml
+
+    from tsundoku.config import DEFAULT_CONFIG_PATH
+
+    data = yaml.safe_load(open(DEFAULT_CONFIG_PATH, encoding="utf-8"))
+    assert (data["price_per_1m_input"], data["price_per_1m_output"]) == (60, 240)  # 第14章の初期値
+    with _keep_config():
+        setup(fake_llm=True, sample_data=True, config_path=DEFAULT_CONFIG_PATH, quiet=True)
+        assert (CONFIG["price_per_1m_input"], CONFIG["price_per_1m_output"]) == (60, 240)
+        # 入力だけ・出力だけで、それぞれのキーの値が効いている（キー名が食い違えば同梱の値にも CONFIG にも届かない）
+        assert cost_jpy({"input": 1_000_000, "output": 0}) == 60
+        assert cost_jpy({"input": 0, "output": 1_000_000}) == 240
+
+
+def test_prices_fallback_when_config_lacks_them(tmp_path):
+    """料金を書いていない config.yaml でも 0 円にならず、同梱の既定値で計算する。書けばその値が優先される（F-18）。"""
+    from pathlib import Path
+
+    import yaml
+
+    from tsundoku.config import DEFAULT_CONFIG_PATH
+
+    data = yaml.safe_load(open(DEFAULT_CONFIG_PATH, encoding="utf-8"))
+    old = {k: v for k, v in data.items() if not k.startswith("price_per_1m_")}  # 料金の項目より前に作った config.yaml
+    assert len(old) == len(data) - 2
+    both = {"input": 1_000_000, "output": 1_000_000}
+    with _keep_config():
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.safe_dump(old, allow_unicode=True), encoding="utf-8")
+        setup(fake_llm=True, sample_data=True, workdir=str(tmp_path / "w1"), config_path=str(path), quiet=True)
+        assert "price_per_1m_input" not in CONFIG and "price_per_1m_output" not in CONFIG
+        assert cost_jpy(both) == 60 + 240  # 0 円ではない
+
+        path.write_text(
+            yaml.safe_dump({**old, "price_per_1m_input": 1, "price_per_1m_output": 2}, allow_unicode=True),
+            encoding="utf-8",
+        )
+        setup(fake_llm=True, sample_data=True, workdir=str(tmp_path / "w2"), config_path=str(path), quiet=True)
+        assert cost_jpy(both) == 1 + 2  # config.yaml に書いた料金が優先
+
+        example = Path(__file__).resolve().parents[1] / "config.example.yaml"
+        ex = yaml.safe_load(open(example, encoding="utf-8"))
+        assert (ex["price_per_1m_input"], ex["price_per_1m_output"]) == (60, 240)
+        setup(fake_llm=True, sample_data=True, workdir=str(tmp_path / "w3"), config_path=str(example), quiet=True)
+        assert cost_jpy(both) == 300
+    # 元に戻っている（他のテストに影響させない）
+    assert settings.workdir != str(tmp_path / "w3") and CONFIG.get("price_per_1m_input") != 1
+
+
+# --- F-18：tsundoku run の経路（run_interactive）で、実行ごとの数え直しと再開をまたいだ扱い ---------------
+# ノードの途中で落とす実行の期間。thread_id が別になるよう W40 の実行と別の期間にする（サンプルの 10/1〜10/4 の96話題）
+CRASH_MODE, CRASH_PERIOD = "monthly", "2026-10"
+CRASH_AT = 4  # この回数目の score_one（Score）の呼び出しで落とす
+
+
+@pytest.fixture(scope="module")
+def cli_runs(tmp_path_factory):
+    """偽 LLM・サンプル・--yes で run_interactive を動かす。
+
+    W40：1回目は承認②で止めたところで落とし（Ctrl+C の想定）、2回目で同じ期間を再開して完了させる。
+    3回目は fresh=True で止めずに最後まで通す。
+    CRASH_PERIOD：4回目は CRASH_AT 回目の score_one で例外を投げて落とし（ノードの途中で落ちた想定）、5回目で再開して完了させる。
+    6回目は fresh=True で止めずに最後まで通す（呼び出し回数の基準）。
+    各回の偽 LLM の呼び出し回数と画面の出力を返す。
+    """
+    import io
+
+    import tsundoku.cli as cli
+    from tsundoku.config import DEFAULT_CONFIG_PATH
+
+    calls = {"n": 0, "score": 0}
+    lock = threading.Lock()
+    real_fake, real_ask = llm._fake, cli.ask
+    crash = {"armed": False, "at": 0}  # at：落とす Score の呼び出しの通し番号
+
+    def counting_fake(schema, user):
+        with lock:
+            if schema is Score and crash["armed"] and calls["score"] + 1 == crash["at"]:
+                crash["armed"] = False
+                # RetryPolicy が再試行しない例外（default_retry_on）。LLM の応答を受け取る前に落ちたので回数に数えない
+                raise RuntimeError("simulated crash in score_one")
+            calls["n"] += 1
+            calls["score"] += schema is Score
+        return real_fake(schema, user)
+
+    stop = {"armed": True}
+
+    def ask_then_crash(value):
+        if value["type"] == "review" and stop["armed"]:
+            stop["armed"] = False
+            raise KeyboardInterrupt  # 承認②の入力中にプロセスが落ちた想定
+        return real_ask(value)
+
+    def run(period, mode="weekly", **kw):
+        start, score_start = calls["n"], calls["score"]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli.run_interactive(mode, period, **kw)
+        return calls["n"] - start, calls["score"] - score_start, buf.getvalue()
+
+    work = str(tmp_path_factory.mktemp("cli"))
+    out = {"work": work}
+    with _keep_config(), pytest.MonkeyPatch.context() as mp:
+        mp.setattr(llm, "_fake", counting_fake)
+        mp.setattr(cli, "ask", ask_then_crash)
+        mp.setattr(cli, "AUTO_APPROVE", True)
+        setup(fake_llm=True, sample_data=True, workdir=work, config_path=DEFAULT_CONFIG_PATH, quiet=True)
+
+        # 1回目：前の実行の分が残っている想定で、わざと数を入れておく（頭で 0 に戻るはず）
+        llm.count_tokens(123_456, 7_890)
+        with contextlib.redirect_stdout(io.StringIO()), pytest.raises(KeyboardInterrupt):
+            cli.run_interactive("weekly", "2026-W40")
+        out["calls_before"] = calls["n"]
+        out["usage_before"] = token_usage()
+
+        # 2回目：同じ期間を指定して再開（同じプロセスだが、run_interactive の頭で数え直す）
+        out["calls_after"], _, out["stdout_resumed"] = run("2026-W40")
+
+        # 3回目：fresh=True で最初から止めずに通す
+        out["calls_fresh"], _, out["stdout_fresh"] = run("2026-W40", fresh=True)
+
+        # 4回目：別の期間で、score_one の途中で落とす
+        start, score_start = calls["n"], calls["score"]
+        crash["armed"], crash["at"] = True, calls["score"] + CRASH_AT
+        with contextlib.redirect_stdout(io.StringIO()), pytest.raises(RuntimeError, match="simulated crash"):
+            cli.run_interactive(CRASH_MODE, CRASH_PERIOD)
+        assert not crash["armed"]  # 確かに score_one で落ちた
+        out["crash_calls_before"], out["crash_score_before"] = calls["n"] - start, calls["score"] - score_start
+
+        # 5回目：同じ期間を再開（承認の待ちではなく、ノードの途中からの再開。cli の app.invoke(None, cfg) の分岐）
+        out["crash_calls_after"], out["crash_score_after"], out["crash_stdout_resumed"] = run(CRASH_PERIOD, CRASH_MODE)
+        path = os.path.join(work, f"report-{CRASH_MODE}-{CRASH_PERIOD}.md")  # 6回目で上書きされるので今読む
+        out["crash_report_resumed"] = open(path, encoding="utf-8").read()
+
+        # 6回目：同じ期間を fresh=True で最初から（呼び出し回数の基準）
+        fresh = run(CRASH_PERIOD, CRASH_MODE, fresh=True)
+        out["crash_calls_fresh"], out["crash_score_fresh"], out["crash_stdout_fresh"] = fresh
+    return out
+
+
+def _printed_metrics(stdout: str) -> dict:
+    lines = [ln for ln in stdout.splitlines() if ln.startswith("metrics: ")]
+    assert len(lines) == 1, lines
+    return json.loads(lines[0][len("metrics: ") :])
+
+
+def _yen(calls: int) -> float:
+    """偽 LLM を calls 回呼んだときの費用の目安。同梱の料金（入力 60 円・出力 240 円／100万トークン）から具体的に作る。"""
+    return round(calls * (1000 * 60 + 200 * 240) / 1e6, 1)
+
+
+def test_run_interactive_resets_tokens(cli_runs):
+    """run_interactive の頭で reset_tokens する：前に残っていた数を持ち越さない。"""
+    n = cli_runs["calls_before"]
+    assert n > 0
+    assert cli_runs["usage_before"] == {"input": n * FAKE_TOKENS[0], "output": n * FAKE_TOKENS[1]}
+
+
+def test_resume_counts_only_after_resume(cli_runs):
+    """中断して再開すると、レポートには再開後の分だけが出る（F-18 の制約）。"""
+    m = _printed_metrics(cli_runs["stdout_resumed"])
+    n = cli_runs["calls_after"]
+    assert n > 0  # 再開後も要約などで LLM を呼んでいる
+    assert (m["tokens_input"], m["tokens_output"]) == (n * FAKE_TOKENS[0], n * FAKE_TOKENS[1])
+    assert m["tokens"] == m["tokens_input"] + m["tokens_output"]
+    assert FAKE_TOKENS == (1000, 200) and m["cost_jpy"] == _yen(n) > 0  # 実装の関数ではなく、具体的な数から
+
+
+def test_printed_metrics_json_and_report_file(cli_runs):
+    """画面の metrics（JSON）にトークン数・費用の目安が入り、保存したレポートに3桁区切りの行が出る。"""
+    m = _printed_metrics(cli_runs["stdout_fresh"])
+    assert {"tokens", "tokens_input", "tokens_output", "cost_jpy"} <= m.keys()
+    assert m["tokens"] > 0 and m["tokens"] == m["tokens_input"] + m["tokens_output"]
+    assert m["cost_jpy"] == _yen(cli_runs["calls_fresh"]) > 0
+    md = open(os.path.join(cli_runs["work"], "report-weekly-2026-W40.md"), encoding="utf-8").read()
+    want = f"- LLM トークン: 入力 {m['tokens_input']:,} ・ 出力 {m['tokens_output']:,}（約 {m['cost_jpy']} 円）"
+    assert want in md.splitlines()
+
+
+def test_fake_llm_tokens_are_deterministic(cli_runs):
+    """偽 LLM では、同じ期間を最初から通したトークン数が呼び出し回数どおりで、中断前後の合計と一致する。"""
+    m = _printed_metrics(cli_runs["stdout_fresh"])
+    n = cli_runs["calls_fresh"]
+    assert (m["tokens_input"], m["tokens_output"]) == (n * FAKE_TOKENS[0], n * FAKE_TOKENS[1])
+    # 中断しても呼び出しの総数は変わらない（再開前の分は数えないだけ）
+    assert n == cli_runs["calls_before"] + cli_runs["calls_after"]
+
+
+def test_resume_after_crash_in_node(cli_runs):
+    """score_one の途中で落ちた後、同じ期間で再開すると、終わっていた採点を呼び直さずに完了する（F-18 の制約）。
+
+    承認の待ちではなく、ノードの途中（snap.next があり snap.interrupts がない）からの再開。
+    レポートのトークン数は再開後に実際に呼んだ分だけで、中断前と再開後の呼び出し回数の合計は最初から通した回と同じ。
+    """
+    before, after, fresh = (cli_runs[f"crash_calls_{k}"] for k in ("before", "after", "fresh"))
+    s_before, s_after, s_fresh = (cli_runs[f"crash_score_{k}"] for k in ("before", "after", "fresh"))
+    out = cli_runs["crash_stdout_resumed"]
+    # 再開の経路：承認で止まっていたのではなく、score_one を残して落ちていた
+    resumed = [ln for ln in out.splitlines() if ln.startswith(f"▶ 再開: {CRASH_MODE}-{CRASH_PERIOD}")]
+    assert len(resumed) == 1 and "score_one" in resumed[0], out[:500]
+    # 落ちる前に終わった採点がある（並列に走るので、落ちた呼び出しの後に終わる分もある）・残りを再開後に採点
+    assert s_before >= CRASH_AT - 1 and 0 < s_after < s_fresh
+    # 終わっていた score_one を二重に呼んでいない（採点も LLM 呼び出し全体も、合計が最初から通した回と同じ）
+    assert s_before + s_after == s_fresh
+    assert before + after == fresh
+    # レポートの metrics は再開後に実際に呼んだ分だけ
+    m = _printed_metrics(out)
+    assert (m["tokens_input"], m["tokens_output"]) == (after * FAKE_TOKENS[0], after * FAKE_TOKENS[1])
+    assert m["tokens"] == m["tokens_input"] + m["tokens_output"]
+    assert m["cost_jpy"] == _yen(after) > 0
+    md = cli_runs["crash_report_resumed"]  # 再開後に保存したレポート
+    assert f"- LLM トークン: 入力 {after * 1000:,} ・ 出力 {after * 200:,}（約 {_yen(after)} 円）" in md.splitlines()
+    # 最初から通した回は、全部の呼び出しを数えている
+    mf = _printed_metrics(cli_runs["crash_stdout_fresh"])
+    assert (mf["tokens_input"], mf["tokens_output"]) == (fresh * FAKE_TOKENS[0], fresh * FAKE_TOKENS[1])
 
 
 # --- 純粋関数の確認（グラフを動かさない）--------------------------------------------------------
