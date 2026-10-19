@@ -71,9 +71,10 @@ def apply_merges(state: dict, groups: list[list[str]]) -> tuple[dict, dict[str, 
     """人の指定（id のリストのリスト）を反映した State の差分と、吸収された id → 残した id の対応を返す。
 
     残すのは合計点が最も高い話題（同点なら提示順で先のもの）。吸収した話題は代表ごと related に入れ、
-    固有名詞・キーワードを合わせてから、まとめた話題を1件として採点し直す（LLM 1回）。
+    固有名詞・キーワードを合わせてから、まとめた話題を1件として採点し直す（残った話題ごとに LLM 1回）。
     """
-    pool = {c["id"]: c for c in state["pool"]}
+    orig = {c["id"]: c for c in state["pool"]}
+    pool = dict(orig)
     scores = {s["id"]: s for s in state["scored"]}
     topics = {t["id"]: t for t in state.get("topics", [])}
     order = {i: k for k, i in enumerate(state.get("shortlist", []))}
@@ -124,14 +125,16 @@ def apply_merges(state: dict, groups: list[list[str]]) -> tuple[dict, dict[str, 
                 "entities": merged["entities"],
                 "keywords": merged["keywords"],
             }
-        before = scores.get(keep)
-        s = score_candidate(merged, state["theme"], state["approved_plan"])  # まとめた話題として評価し直す
-        scores[keep] = s
-        new_scores.append(s)
         records.append({"into": keep, "merged": [i for i in ids if i != keep]})
+    # 採点し直すのは、全部まとめ終えて残った話題だけ（連鎖して途中で吸収された話題の採点に LLM を使わない）
+    for k in dict.fromkeys(resolve(r["into"]) for r in records):
+        before = scores.get(k)
+        s = score_candidate(pool[k], state["theme"], state["approved_plan"])  # まとめた話題として評価し直す
+        new_scores.append(s)
+        gone = [orig[i]["title"][:30] for i in alias if resolve(i) == k]
         log(
-            f"[review] 人がまとめた: {base['title'][:40]} ← {len(reps)} 話題（{', '.join(r['title'][:30] for r in reps)}）"
-            f"。評価 {total_score(before, base) if before else '未採点'} → {total_score(s, merged)}"
+            f"[review] 人がまとめた: {orig[k]['title'][:40]} ← {len(gone)} 話題（{', '.join(gone)}）"
+            f"。評価 {total_score(before, orig[k]) if before else '未採点'} → {total_score(s, pool[k])}"
         )
     if not records:
         return {}, {}

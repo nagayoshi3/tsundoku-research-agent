@@ -162,3 +162,14 @@ def test_old_chained_records_resolve_through_history(state, tmp_path, monkeypatc
     state["shortlist"] = ["c", "d"]
     extra, _ = hm.apply_merges(state, [["c", "d"]])
     assert [m["final"] for m in extra["feedback"]["merges"]] == ["c", "c", "c"]
+
+
+def test_chained_merges_rescore_only_surviving_topic(state, monkeypatch):
+    """連鎖してまとめても（a←b の後に c←a）、採点し直す（LLM）のは残った c の1回だけで、中身は a・b を含む。"""
+    calls = []
+    monkeypatch.setattr(
+        hm, "score_candidate", lambda m, theme, plan: calls.append((m["id"], len(m["related"]))) or _score(m["id"], 1)
+    )
+    extra, _ = hm.apply_merges(state, [["a", "b"], ["a", "c"]])
+    assert calls == [("c", 2)]
+    assert [s["id"] for s in extra["scored"]] == ["c"]
